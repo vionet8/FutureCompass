@@ -1,0 +1,2039 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Future Compass — 未来コンパス</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --bg2: #1a1d27;
+    --bg3: #242736;
+    --border: #2e3248;
+    --accent: #6c63ff;
+    --accent2: #00d4aa;
+    --warn: #ff6b6b;
+    --text: #e8eaf0;
+    --text2: #8b90a7;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+  /* NAV */
+  nav { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; height: 56px; gap: 24px; position: sticky; top: 0; z-index: 100; }
+  nav .logo { font-size: 1.1rem; font-weight: 700; color: var(--accent); letter-spacing: .5px; }
+  nav .logo span { color: var(--accent2); }
+  nav .nav-links { display: flex; gap: 2px; flex: 1; overflow: hidden; }
+  nav .nav-links button { background: none; border: none; color: var(--text2); padding: 6px 9px; border-radius: 8px; cursor: pointer; font-size: .82rem; transition: all .2s; white-space: nowrap; }
+  nav .nav-links button.active, nav .nav-links button:hover { background: var(--bg3); color: var(--text); }
+  nav .auth-area { display: flex; gap: 8px; align-items: center; }
+  nav .auth-area button { padding: 6px 18px; border-radius: 8px; border: none; cursor: pointer; font-size: .9rem; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-secondary { background: var(--bg3); color: var(--text); border: 1px solid var(--border) !important; }
+  .btn-success { background: var(--accent2); color: #0f1117; }
+
+  /* PAGES */
+  .page { display: none; padding: 28px 24px; max-width: 1100px; margin: 0 auto; }
+  .page.active { display: block; }
+
+  /* AUTH PAGE */
+  .auth-card { max-width: 420px; margin: 60px auto; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 40px; }
+  .auth-card h2 { margin-bottom: 24px; font-size: 1.4rem; }
+  .form-group { margin-bottom: 16px; }
+  .form-group label { display: block; color: var(--text2); font-size: .85rem; margin-bottom: 6px; }
+  .form-group input, .form-group select { width: 100%; padding: 10px 14px; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: .95rem; outline: none; }
+  .form-group input:focus { border-color: var(--accent); }
+  .auth-toggle { margin-top: 16px; text-align: center; color: var(--text2); font-size: .9rem; }
+  .auth-toggle a { color: var(--accent); cursor: pointer; text-decoration: none; }
+
+  /* SECTION HEADERS */
+  .section-title { font-size: 1.2rem; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+  .section-title .badge { font-size: .75rem; padding: 3px 8px; border-radius: 4px; }
+  .badge-fire { background: rgba(255,107,107,.2); color: var(--warn); }
+  .badge-new { background: rgba(0,212,170,.2); color: var(--accent2); }
+
+  /* 3指標カード */
+  .tricard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 20px; }
+  .tricard { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 18px; position: relative; overflow: hidden; }
+  .tricard::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+  .tricard.flow::before { background: var(--accent); }
+  .tricard.stock::before { background: var(--accent2); }
+  .tricard.future::before { background: #ff9f43; }
+  .tricard .tc-num { font-size: .75rem; font-weight: 700; letter-spacing: .08em; color: var(--text2); margin-bottom: 4px; }
+  .tricard .tc-label { font-size: .9rem; color: var(--text2); margin-bottom: 10px; }
+  .tricard .tc-grade { font-size: 2.4rem; font-weight: 800; line-height: 1; }
+  .grade-A { color: var(--accent2); }
+  .grade-B { color: #6c63ff; }
+  .grade-C { color: #ff9f43; }
+  .grade-D { color: var(--warn); }
+  .tricard .tc-value { font-size: .88rem; color: var(--text2); margin-top: 6px; }
+  .tricard .tc-comment { font-size: .78rem; color: var(--text2); margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); line-height: 1.5; }
+
+  /* 自力改善指数 */
+  .self-index-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; margin-bottom: 20px; }
+  .self-index-bar { height: 22px; border-radius: 11px; overflow: hidden; display: flex; margin: 12px 0 6px; }
+  .self-index-bar .behavior-part { background: var(--accent2); transition: width .8s ease; }
+  .self-index-bar .market-part { background: var(--bg3); }
+  .self-index-labels { display: flex; justify-content: space-between; font-size: .8rem; color: var(--text2); }
+
+  @media (max-width: 600px) { .tricard-grid { grid-template-columns: 1fr; } }
+
+  /* DASHBOARD CARDS */
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .kpi-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+  .kpi-card .label { color: var(--text2); font-size: .82rem; margin-bottom: 6px; }
+  .kpi-card .value { font-size: 1.7rem; font-weight: 700; }
+  .kpi-card .sub { color: var(--text2); font-size: .82rem; margin-top: 4px; }
+  .kpi-card.accent { border-color: var(--accent); }
+  .kpi-card.success { border-color: var(--accent2); }
+  .kpi-card.warn { border-color: var(--warn); }
+
+  /* FIRE METER */
+  .fire-meter-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin-bottom: 24px; }
+  .fire-bar-outer { height: 28px; background: var(--bg3); border-radius: 14px; overflow: hidden; position: relative; }
+  .fire-bar-inner { height: 100%; border-radius: 14px; transition: width 1s ease; display: flex; align-items: center; justify-content: flex-end; padding-right: 10px; font-size: .82rem; font-weight: 600; color: #fff; }
+  .fire-labels { display: flex; justify-content: space-between; color: var(--text2); font-size: .8rem; margin-top: 6px; }
+
+  /* CHARTS */
+  .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  .chart-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+  .chart-card canvas { max-height: 260px; }
+
+  /* 計算根拠パネル */
+  .explain-toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; margin-bottom: 16px; }
+  .explain-toggle .toggle-btn { background: var(--bg3); border: 1px solid var(--border); border-radius: 20px; padding: 5px 16px; font-size: .82rem; color: var(--text2); transition: all .2s; }
+  .explain-toggle .toggle-btn:hover, .explain-toggle .toggle-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .explain-panel { display: none; margin-bottom: 24px; }
+  .explain-panel.open { display: block; }
+  .explain-section { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; }
+  .explain-section-header { padding: 14px 18px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: .9rem; font-weight: 600; }
+  .explain-section-header:hover { background: var(--bg3); }
+  .explain-section-body { display: none; padding: 0 18px 16px; }
+  .explain-section-body.open { display: block; }
+  .explain-step { border-left: 3px solid var(--accent); margin-bottom: 14px; padding-left: 14px; }
+  .explain-step .step-title { font-size: .85rem; font-weight: 600; margin-bottom: 6px; color: var(--text); }
+  .explain-step .step-formula { font-size: .8rem; color: var(--text2); margin-bottom: 4px; font-family: monospace; background: var(--bg3); padding: 4px 8px; border-radius: 4px; display: inline-block; }
+  .explain-step .step-calc { font-size: .88rem; color: var(--accent2); font-weight: 600; margin: 6px 0; }
+  .explain-step .step-note { font-size: .78rem; color: var(--text2); line-height: 1.6; margin-top: 4px; padding: 6px 10px; background: rgba(108,99,255,.08); border-radius: 4px; }
+
+  /* AI REPORT */
+  .ai-report-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin-bottom: 24px; }
+  .ai-report-card .report-body { color: var(--text2); font-size: .92rem; line-height: 1.7; white-space: pre-wrap; }
+  .disclaimer { background: rgba(108,99,255,.1); border: 1px solid rgba(108,99,255,.3); border-radius: 8px; padding: 12px 16px; color: var(--text2); font-size: .82rem; margin-top: 16px; }
+
+  /* PROFILE FORM */
+  .profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .full-width { grid-column: 1 / -1; }
+  .input-group { display: flex; align-items: center; gap: 8px; }
+  .input-group input { flex: 1; }
+  .input-group span { color: var(--text2); font-size: .9rem; min-width: 24px; }
+
+  /* SCENARIO COMPARE */
+  .scenario-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .scenario-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+  .scenario-card h4 { margin-bottom: 12px; font-size: 1rem; }
+  .scenario-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: .88rem; color: var(--text2); }
+  .scenario-row:last-child { border: none; }
+  .scenario-row .val { color: var(--text); font-weight: 600; }
+  .val.green { color: var(--accent2); }
+  .val.red { color: var(--warn); }
+
+  /* 予算管理 */
+  .budget-header { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px 24px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 16px; }
+  .budget-header .total-remaining { font-size: 2.4rem; font-weight: 800; }
+  .budget-header .total-remaining.safe { color: var(--accent2); }
+  .budget-header .total-remaining.warn { color: #ff9f43; }
+  .budget-header .total-remaining.over { color: var(--warn); }
+  .budget-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .budget-cat-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
+  .budget-cat-card .cat-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .budget-cat-card .cat-name { font-size: .95rem; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .budget-cat-card .cat-budget { font-size: .8rem; color: var(--text2); }
+  .budget-progress { height: 10px; background: var(--bg3); border-radius: 5px; overflow: hidden; margin-bottom: 8px; }
+  .budget-progress-bar { height: 100%; border-radius: 5px; transition: width .6s ease; }
+  .budget-amounts { display: flex; gap: 12px; font-size: .78rem; color: var(--text2); margin-bottom: 10px; flex-wrap: wrap; }
+  .budget-amounts .confirmed { color: var(--text); font-weight: 600; }
+  .budget-amounts .provisional { color: #ff9f43; }
+  .budget-amounts .remaining { color: var(--accent2); font-weight: 600; }
+  .entry-list { display: flex; flex-direction: column; gap: 4px; max-height: 140px; overflow-y: auto; }
+  .entry-item { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: .8rem; gap: 8px; }
+  .entry-item:last-child { border: none; }
+  .entry-item .e-desc { flex: 1; color: var(--text); }
+  .entry-item .e-status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .e-status-dot.confirmed { background: var(--accent2); }
+  .e-status-dot.provisional { background: #ff9f43; }
+  .entry-item .e-amount { font-weight: 600; white-space: nowrap; }
+  .entry-item .e-delete { background: none; border: none; color: var(--text2); cursor: pointer; padding: 2px 4px; font-size: .9rem; opacity: 0; transition: opacity .2s; }
+  .entry-item:hover .e-delete { opacity: 1; }
+
+  /* 仮計上フォーム */
+  .quick-add-form { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; }
+  .quick-add-row { display: grid; grid-template-columns: 1fr 1fr auto auto auto; gap: 10px; align-items: end; }
+  @media (max-width: 700px) { .quick-add-row { grid-template-columns: 1fr 1fr; } }
+
+  /* PROGRESS */
+  .loading { display: flex; align-items: center; gap: 12px; padding: 20px; color: var(--text2); }
+  .spinner { width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ALERTS */
+  .alert { padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-size: .9rem; }
+  .alert-error { background: rgba(255,107,107,.15); border: 1px solid rgba(255,107,107,.4); color: var(--warn); }
+  .alert-success { background: rgba(0,212,170,.15); border: 1px solid rgba(0,212,170,.4); color: var(--accent2); }
+
+  /* HISTORY */
+  .history-list { display: flex; flex-direction: column; gap: 10px; }
+  .history-item { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; }
+  .history-item .meta { color: var(--text2); font-size: .82rem; }
+
+  /* CSV UPLOAD */
+  .upload-zone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 40px; text-align: center; cursor: pointer; transition: border-color .2s; }
+  .upload-zone:hover { border-color: var(--accent); }
+  .upload-zone input { display: none; }
+
+  /* RESP */
+  @media (max-width: 700px) {
+    .chart-grid { grid-template-columns: 1fr; }
+    .profile-grid { grid-template-columns: 1fr; }
+    .full-width { grid-column: 1; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">🧭 Future<span>Compass</span></div>
+  <div class="nav-links" id="navLinks">
+    <button onclick="showPage('dashboard')" data-page="dashboard">ダッシュボード</button>
+    <button onclick="showPage('household')" data-page="household">家計分析</button>
+    <button onclick="showPage('budget')" data-page="budget">予算管理</button>
+    <button onclick="showPage('profile')" data-page="profile">プロフィール</button>
+    <button onclick="showPage('scenarios')" data-page="scenarios">シナリオ比較</button>
+    <button onclick="showPage('history')" data-page="history">履歴</button>
+  </div>
+  <div class="auth-area" id="authArea">
+    <button class="btn-primary" onclick="showPage('auth')">ログイン</button>
+  </div>
+</nav>
+
+<!-- AUTH PAGE -->
+<div class="page active" id="page-auth">
+  <div class="auth-card">
+    <h2 id="authTitle">ログイン</h2>
+    <div id="authAlert"></div>
+    <div class="form-group">
+      <label>メールアドレス</label>
+      <input type="email" id="authEmail" placeholder="you@example.com">
+    </div>
+    <div class="form-group">
+      <label>パスワード</label>
+      <input type="password" id="authPassword" placeholder="8文字以上">
+    </div>
+    <button class="btn-primary" style="width:100%;padding:12px;border-radius:8px;font-size:1rem;" onclick="submitAuth()">
+      <span id="authBtnText">ログイン</span>
+    </button>
+    <div class="auth-toggle">
+      <span id="authToggleText">アカウントがない方は</span>
+      <a onclick="toggleAuthMode()">新規登録</a>
+    </div>
+  </div>
+</div>
+
+<!-- DASHBOARD PAGE -->
+<div class="page" id="page-dashboard">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+    <div class="section-title" style="margin:0">
+      ダッシュボード
+      <span class="badge badge-new" id="lastUpdatedBadge"></span>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;">
+      <span style="font-size:.82rem;color:var(--text2);margin-right:4px">表示:</span>
+      <button id="btnSimple" class="btn-primary" style="padding:6px 16px;border-radius:8px;font-size:.85rem;" onclick="setViewMode('simple')">ざっくり</button>
+      <button id="btnDetail" class="btn-secondary" style="padding:6px 16px;border-radius:8px;font-size:.85rem;" onclick="setViewMode('detail')">詳細</button>
+    </div>
+  </div>
+
+  <div id="dashAlert"></div>
+
+  <!-- 3指標カード（フロー / ストック / 将来） -->
+  <div class="tricard-grid" id="tricardGrid" style="display:none">
+    <div class="tricard flow">
+      <div class="tc-num">① 家計健全度</div>
+      <div class="tc-label">フロー — 今年の収支</div>
+      <div class="tc-grade" id="tcHouseholdGrade">—</div>
+      <div class="tc-value" id="tcHouseholdValue"></div>
+      <div class="tc-comment" id="tcHouseholdComment"></div>
+    </div>
+    <div class="tricard stock">
+      <div class="tc-num">② 資産形成力</div>
+      <div class="tc-label">ストック — 資産の増減</div>
+      <div class="tc-grade" id="tcWealthGrade">—</div>
+      <div class="tc-value" id="tcWealthValue"></div>
+      <div class="tc-comment" id="tcWealthComment"></div>
+    </div>
+    <div class="tricard future">
+      <div class="tc-num">③ 将来達成率</div>
+      <div class="tc-label">FIRE — 目標への進捗</div>
+      <div class="tc-grade" id="tcFutureGrade">—</div>
+      <div class="tc-value" id="tcFutureValue"></div>
+      <div class="tc-comment" id="tcFutureComment"></div>
+    </div>
+  </div>
+
+  <!-- 自力改善指数 -->
+  <div class="self-index-card" id="selfIndexCard" style="display:none">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
+      <div>
+        <div class="section-title" style="margin:0 0 4px;font-size:1rem">自力改善指数</div>
+        <div style="font-size:.82rem;color:var(--text2)">資産変動のうち、あなたの行動によるものはどれだけか</div>
+      </div>
+      <div id="selfIndexBadge" style="font-size:1.3rem;font-weight:800;color:var(--accent2)"></div>
+    </div>
+    <div class="self-index-bar">
+      <div class="behavior-part" id="behaviorBar" style="width:0%"></div>
+      <div class="market-part" style="flex:1"></div>
+    </div>
+    <div class="self-index-labels">
+      <span id="selfBehaviorLabel" style="color:var(--accent2);font-weight:600"></span>
+      <span id="selfMarketLabel" style="color:var(--text2)"></span>
+    </div>
+    <div id="selfIndexMessage" style="margin-top:14px;padding:12px 16px;background:var(--bg3);border-radius:8px;font-size:.88rem;line-height:1.6;"></div>
+  </div>
+
+  <div class="kpi-grid" id="kpiGrid">
+    <div class="kpi-card accent">
+      <div class="label">FIRE達成予測年齢</div>
+      <div class="value" id="kpiFireAge">—</div>
+      <div class="sub" id="kpiFireSub"></div>
+    </div>
+    <div class="kpi-card">
+      <div class="label">退職時資産（予測）</div>
+      <div class="value" id="kpiRetAssets">—</div>
+      <div class="sub">万円</div>
+    </div>
+    <div class="kpi-card success">
+      <div class="label">vs ベンチマーク</div>
+      <div class="value" id="kpiBench">—</div>
+      <div class="sub">オルカン比</div>
+    </div>
+    <div class="kpi-card warn">
+      <div class="label">老後不足額</div>
+      <div class="value" id="kpiShortfall">—</div>
+      <div class="sub">万円（0なら黒字）</div>
+    </div>
+  </div>
+
+  <!-- FIRE達成率メーター -->
+  <div class="fire-meter-wrap" id="fireMeterWrap" style="display:none">
+    <div style="display:flex;justify-content:space-between;margin-bottom:12px;">
+      <div class="section-title" style="margin:0">FIRE達成率</div>
+      <div id="firePct" style="font-size:1.2rem;font-weight:700;color:var(--accent2)"></div>
+    </div>
+    <div class="fire-bar-outer">
+      <div class="fire-bar-inner" id="fireBar" style="width:0;background:linear-gradient(90deg,var(--accent),var(--accent2))"></div>
+    </div>
+    <div class="fire-labels">
+      <span>現在の資産</span>
+      <span id="fireThreshold">目標：4%ルール達成額</span>
+    </div>
+  </div>
+
+  <!-- LIFE STAGE TIMELINE -->
+  <div id="lifestageWrap" style="display:none;margin-bottom:24px;">
+    <div class="section-title">ライフステージ分析</div>
+    <div id="lifestageInfo" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px;"></div>
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;">
+      <div style="font-size:.85rem;color:var(--text2);margin-bottom:12px;">年齢別フェーズ（横軸：年齢）</div>
+      <div id="phaseTimeline" style="display:flex;gap:2px;height:36px;align-items:stretch;border-radius:6px;overflow:hidden;"></div>
+      <div style="display:flex;gap:16px;margin-top:10px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:6px;font-size:.8rem;color:var(--text2)"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#00d4aa"></span>稼ぎ時</div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:.8rem;color:var(--text2)"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#ff6b6b"></span>かかり時</div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:.8rem;color:var(--text2)"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#6c63ff"></span>安定期</div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:.8rem;color:var(--text2)"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#3a3d52"></span>老後準備期</div>
+      </div>
+    </div>
+    <!-- イベントリスト -->
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-top:12px;">
+      <div style="font-size:.9rem;font-weight:600;margin-bottom:12px;">主要ライフイベント</div>
+      <div id="eventList" style="display:flex;flex-direction:column;gap:8px;max-height:220px;overflow-y:auto;"></div>
+    </div>
+  </div>
+
+  <!-- CHARTS -->
+  <div class="chart-grid">
+    <div class="chart-card">
+      <div style="margin-bottom:10px">
+        <div class="section-title" style="font-size:1rem;margin-bottom:2px">📈 資産推移（将来予測）</div>
+        <div id="assetsChartSub" style="font-size:.78rem;color:var(--text2)">現在〜老後まで、資産がどう増減するかの予測。紫＝予測資産、赤点線＝FIRE達成ライン</div>
+      </div>
+      <canvas id="assetsChart"></canvas>
+    </div>
+    <div class="chart-card">
+      <div style="margin-bottom:10px">
+        <div class="section-title" style="font-size:1rem;margin-bottom:2px">🎓 教育費 ＋ 生活費（将来予測）</div>
+        <div id="expenseChartSub" style="font-size:.78rem;color:var(--text2)">インフレを加味した毎年の支出。赤＝教育費（子供の学校ステージ別）、紫＝生活費</div>
+      </div>
+      <canvas id="expenseChart"></canvas>
+    </div>
+  </div>
+  <div class="chart-grid" style="margin-top:16px;">
+    <div class="chart-card">
+      <div style="margin-bottom:10px">
+        <div class="section-title" style="font-size:1rem;margin-bottom:2px">💰 年間収支（将来予測）</div>
+        <div id="cashflowChartSub" style="font-size:.78rem;color:var(--text2)">緑＝収入が支出を上回る年、赤＝赤字年。マイナスが続く時期が「かかり時」</div>
+      </div>
+      <canvas id="cashflowChart"></canvas>
+    </div>
+    <div class="chart-card">
+      <div style="margin-bottom:10px">
+        <div class="section-title" style="font-size:1rem;margin-bottom:2px">🔍 今年の収支内訳</div>
+        <div style="font-size:.78rem;color:var(--text2)">今年1年間の収入をどこに使っているか。余剰貯蓄が多いほど資産形成が進む</div>
+      </div>
+      <canvas id="incomeChart"></canvas>
+    </div>
+  </div>
+
+  <!-- OUTLOOK SCENARIOS (楽観/悲観) -->
+  <div style="margin-bottom:24px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+      <div class="section-title" style="margin:0">シナリオ別見通し</div>
+      <button class="btn-secondary" style="padding:7px 18px;border-radius:8px;font-size:.85rem;" onclick="runOutlookScenarios()">
+        楽観 / ベース / 悲観を比較
+      </button>
+    </div>
+    <div id="outlookLoading" class="loading" style="display:none">
+      <div class="spinner"></div>3シナリオ計算中...
+    </div>
+    <div id="outlookCards" class="scenario-grid" style="display:none"></div>
+  </div>
+
+  <!-- 計算根拠トグル -->
+  <div id="explainToggleRow" style="display:none;margin-bottom:8px;">
+    <div class="explain-toggle">
+      <span style="font-size:.85rem;color:var(--text2)">数値の根拠：</span>
+      <button class="toggle-btn" id="toggleSimple" onclick="setViewMode('simple')">結果だけ見る</button>
+      <button class="toggle-btn active" id="toggleDetail" onclick="setViewMode('detail')">計算ステップを見る</button>
+    </div>
+  </div>
+
+  <!-- 計算根拠パネル -->
+  <div class="explain-panel" id="explainPanel">
+    <!-- FIRE達成年齢 -->
+    <div class="explain-section">
+      <div class="explain-section-header" onclick="toggleExplainSection('fireExplain')">
+        <span>🎯 FIRE達成年齢はどう計算されたか</span><span id="fireExplainArrow">▼</span>
+      </div>
+      <div class="explain-section-body" id="fireExplain">
+        <div id="fireSteps"></div>
+      </div>
+    </div>
+    <!-- 家計健全度 -->
+    <div class="explain-section">
+      <div class="explain-section-header" onclick="toggleExplainSection('householdExplain')">
+        <span>① 家計健全度グレードの根拠</span><span id="householdExplainArrow">▼</span>
+      </div>
+      <div class="explain-section-body" id="householdExplain">
+        <div id="householdSteps"></div>
+      </div>
+    </div>
+    <!-- 資産形成力 -->
+    <div class="explain-section">
+      <div class="explain-section-header" onclick="toggleExplainSection('wealthExplain')">
+        <span>② 資産形成力・自力改善指数の根拠</span><span id="wealthExplainArrow">▼</span>
+      </div>
+      <div class="explain-section-body" id="wealthExplain">
+        <div id="wealthSteps"></div>
+      </div>
+    </div>
+    <!-- 退職時資産 -->
+    <div class="explain-section">
+      <div class="explain-section-header" onclick="toggleExplainSection('retirementExplain')">
+        <span>📈 退職時資産の計算根拠</span><span id="retirementExplainArrow">▼</span>
+      </div>
+      <div class="explain-section-body" id="retirementExplain">
+        <div id="retirementSteps"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI REPORT -->
+  <div class="ai-report-card" id="aiReportCard" style="display:none">
+    <div class="section-title">🤖 AIファイナンシャルプランナー レポート</div>
+    <div class="report-body" id="aiReportBody"></div>
+    <div class="disclaimer">本レポートは情報提供を目的としており、投資助言ではありません。個別銘柄の推奨は行っておりません。</div>
+  </div>
+
+  <div id="dashLoading" class="loading" style="display:none">
+    <div class="spinner"></div>シミュレーション実行中...
+  </div>
+
+  <div style="display:flex;gap:12px;margin-top:8px;">
+    <button class="btn-primary" style="padding:12px 28px;border-radius:8px;font-size:.95rem;" onclick="runSimulation()">
+      シミュレーション実行
+    </button>
+    <button class="btn-secondary" style="padding:12px 20px;border-radius:8px;font-size:.95rem;" onclick="showPage('profile')">
+      プロフィール編集
+    </button>
+  </div>
+</div>
+
+<!-- PROFILE PAGE -->
+<div class="page" id="page-profile">
+  <div class="section-title">ライフプラン情報の入力</div>
+
+  <!-- このアプリが何をするか説明 -->
+  <div style="background:linear-gradient(135deg,rgba(108,99,255,.15),rgba(0,212,170,.1));border:1px solid rgba(108,99,255,.3);border-radius:var(--radius);padding:20px 24px;margin-bottom:24px;">
+    <div style="font-size:1rem;font-weight:600;margin-bottom:10px;">📋 このページで入力すること</div>
+    <div style="font-size:.88rem;color:var(--text2);line-height:1.8;">
+      このアプリは <strong style="color:var(--text)">「今の家計データ」から「将来の資産・FIRE達成・教育費ピーク」をAIが予測</strong> します。<br>
+      <strong>CSVは不要です。</strong> 下の3ステップをすべて手入力で埋めれば、すぐにシミュレーションが動きます。
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:14px;">
+      <div style="background:rgba(0,0,0,.2);border-radius:8px;padding:12px;">
+        <div style="font-size:.75rem;color:var(--accent);font-weight:700;margin-bottom:4px;">STEP 1</div>
+        <div style="font-size:.88rem;font-weight:600;">家族構成</div>
+        <div style="font-size:.78rem;color:var(--text2);margin-top:2px;">年齢・子供の人数と年齢<br>→ 教育費のピークを計算</div>
+      </div>
+      <div style="background:rgba(0,0,0,.2);border-radius:8px;padding:12px;">
+        <div style="font-size:.75rem;color:var(--accent2);font-weight:700;margin-bottom:4px;">STEP 2</div>
+        <div style="font-size:.88rem;font-weight:600;">今の収支・資産</div>
+        <div style="font-size:.78rem;color:var(--text2);margin-top:2px;">年収・支出・資産・投資額<br>→ 将来の積立額を計算</div>
+      </div>
+      <div style="background:rgba(0,0,0,.2);border-radius:8px;padding:12px;">
+        <div style="font-size:.75rem;color:#ff9f43;font-weight:700;margin-bottom:4px;">STEP 3</div>
+        <div style="font-size:.88rem;font-weight:600;">目標設定</div>
+        <div style="font-size:.78rem;color:var(--text2);margin-top:2px;">FIRE希望年齢・退職年齢<br>→ 達成可能かを判定</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="profileAlert"></div>
+
+  <!-- STEP 1 -->
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:28px;margin-bottom:24px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+      <span style="background:var(--accent);color:#fff;font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:4px;">STEP 1</span>
+      <h3 style="font-size:1rem;">家族構成</h3>
+    </div>
+    <p style="font-size:.82rem;color:var(--text2);margin-bottom:18px;">子供の年齢から、小学校・中学・高校・大学の教育費が何歳のときにいくらかかるかを自動計算します。</p>
+    <div class="profile-grid">
+      <div class="form-group">
+        <label>あなたの年齢</label>
+        <div class="input-group"><input type="number" id="pAge" min="20" max="80" placeholder="38"><span>歳</span></div>
+      </div>
+      <div class="form-group">
+        <label>配偶者の年齢 <span style="color:var(--text2);font-size:.78rem;">（いない場合は空欄）</span></label>
+        <div class="input-group"><input type="number" id="pSpouseAge" min="20" max="80" placeholder="36"><span>歳</span></div>
+      </div>
+      <div class="form-group full-width">
+        <label>子供の年齢 <span style="color:var(--text2);font-size:.78rem;">（複数いる場合はカンマ区切り。いない場合は空欄）</span></label>
+        <input type="text" id="pChildren" placeholder="例: 5  または  3,7,10">
+      </div>
+      <div class="form-group full-width">
+        <label>教育費の方針 <span style="color:var(--text2);font-size:.78rem;">（子供の進路イメージ）</span></label>
+        <select id="pEduType" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:8px;font-size:.9rem;width:100%;">
+          <option value="public">全員公立（国公立大）　※ 教育費 目安: 小〜大で約700万円</option>
+          <option value="private_high">高校・大学から私立　※ 教育費 目安: 小〜大で約1,200万円</option>
+          <option value="mixed">中学から私立　※ 教育費 目安: 小〜大で約1,600万円</option>
+          <option value="private">全員私立（私立大含む）　※ 教育費 目安: 小〜大で約2,400万円</option>
+        </select>
+        <div style="font-size:.75rem;color:var(--text2);margin-top:4px;">※ 上記は1人あたりの概算。保育・幼稚園〜大学卒業まで（文科省データ基準）</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 2 -->
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:28px;margin-bottom:24px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+      <span style="background:var(--accent2);color:#0f1117;font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:4px;">STEP 2</span>
+      <h3 style="font-size:1rem;">今の収支・資産（万円単位）</h3>
+    </div>
+    <p style="font-size:.82rem;color:var(--text2);margin-bottom:18px;">
+      ざっくりで大丈夫です。正確な数字よりも「だいたいこのくらい」が大事です。<br>
+      <strong style="color:var(--text)">年収</strong>＝手取りではなく額面。　<strong style="color:var(--text)">支出</strong>＝食費・光熱費・家賃など生活費の合計（教育費は除く）。　<strong style="color:var(--text)">資産</strong>＝預金＋投資信託＋株など。
+    </p>
+    <div class="profile-grid">
+      <div class="form-group">
+        <label>あなたの年収（額面）</label>
+        <div class="input-group"><input type="number" id="pIncome" min="0" placeholder="600"><span>万円</span></div>
+      </div>
+      <div class="form-group">
+        <label>配偶者の年収（額面）<span style="color:var(--text2);font-size:.78rem;"> 専業主婦なら0</span></label>
+        <div class="input-group"><input type="number" id="pSpouseIncome" min="0" value="0" placeholder="400"><span>万円</span></div>
+      </div>
+      <div class="form-group">
+        <label>年間生活費（教育費除く）</label>
+        <div class="input-group"><input type="number" id="pExpense" min="0" placeholder="360"><span>万円</span></div>
+        <div style="font-size:.75rem;color:var(--text2);margin-top:4px;">月30万なら → 360と入力</div>
+      </div>
+      <div class="form-group">
+        <label>現金・預金（銀行口座残高）</label>
+        <div class="input-group"><input type="number" id="pCashAssets" min="0" placeholder="300"><span>万円</span></div>
+        <div style="font-size:.75rem;color:var(--text2);margin-top:4px;">普通預金・定期預金など。年率0.1%で運用</div>
+      </div>
+      <div class="form-group">
+        <label>投資資産（NISA・iDeCo・株・投信）</label>
+        <div class="input-group"><input type="number" id="pInvestAssets" min="0" placeholder="900"><span>万円</span></div>
+        <div style="font-size:.75rem;color:var(--text2);margin-top:4px;">設定した投資リターン率で運用</div>
+      </div>
+      <div class="form-group">
+        <label>毎月の投資額</label>
+        <div class="input-group"><input type="number" id="pMonthlyInvest" min="0" placeholder="5"><span>万円</span></div>
+        <div style="font-size:.75rem;color:var(--text2);margin-top:4px;">NISAの積立額など。投資していなければ0</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:28px;margin-bottom:24px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+      <span style="background:#ff9f43;color:#0f1117;font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:4px;">STEP 3</span>
+      <h3 style="font-size:1rem;">目標・前提条件</h3>
+    </div>
+    <p style="font-size:.82rem;color:var(--text2);margin-bottom:18px;">FIRE（経済的自立）を目指していない場合は、FIRE目標年齢は空欄でOKです。リターン・インフレは初期値のままで十分です。</p>
+    <div class="profile-grid">
+      <div class="form-group">
+        <label>FIRE目標年齢 <span style="color:var(--text2);font-size:.78rem;">（任意）</span></label>
+        <div class="input-group"><input type="number" id="pFireAge" min="30" max="70" placeholder="45"><span>歳</span></div>
+      </div>
+      <div class="form-group">
+        <label>退職予定年齢</label>
+        <div class="input-group"><input type="number" id="pRetAge" value="65" min="50" max="75"><span>歳</span></div>
+      </div>
+      <div class="form-group">
+        <label>想定投資リターン <span style="color:var(--text2);font-size:.78rem;">（オルカン目安：5〜7%）</span></label>
+        <div class="input-group"><input type="number" id="pReturnRate" value="5" min="1" max="15" step="0.5"><span>%</span></div>
+      </div>
+      <div class="form-group">
+        <label>インフレ率想定 <span style="color:var(--text2);font-size:.78rem;">（日本平均：2%）</span></label>
+        <div class="input-group"><input type="number" id="pInflation" value="2" min="0" max="5" step="0.5"><span>%</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CSV UPLOAD -->
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:28px;margin-bottom:24px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+      <div class="section-title" style="font-size:1rem;margin:0">資産額の自動取込（スキップOK）</div>
+      <span style="font-size:.72rem;background:var(--bg3);color:var(--text2);padding:2px 8px;border-radius:4px;">任意</span>
+    </div>
+    <p style="color:var(--text2);font-size:.84rem;margin-bottom:4px;line-height:1.7;">
+      STEP 2の <strong style="color:var(--text)">「現在の金融資産合計」</strong> を手入力したくない場合のみ使います。<br>
+      マネーフォワードや証券会社のCSVをアップロードすると、資産額が自動入力されます。
+    </p>
+    <div style="background:var(--bg3);border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:.8rem;color:var(--text2);line-height:1.8;">
+      <strong style="color:var(--text)">マネーフォワード</strong> → 「資産」→「資産推移」→「CSVダウンロード」<br>
+      <strong style="color:var(--text)">楽天証券</strong> → 「保有証券」→「CSVダウンロード」<br>
+      <strong style="color:var(--text)">SBI証券</strong> → 「口座管理」→「保有証券一覧」→「CSVダウンロード」
+    </div>
+    <div class="upload-zone" onclick="document.getElementById('csvInput').click()">
+      <input type="file" id="csvInput" accept=".csv" onchange="uploadCSV(this)">
+      <div style="font-size:2rem;margin-bottom:8px;">📂</div>
+      <div>クリックしてCSVを選択</div>
+      <div style="color:var(--text2);font-size:.82rem;margin-top:4px;">取込後、資産額の欄に自動入力されます</div>
+    </div>
+    <div id="csvResult" style="margin-top:12px;"></div>
+  </div>
+
+  <button class="btn-success" style="padding:13px 32px;border-radius:8px;font-size:1rem;" onclick="saveProfile()">
+    保存してシミュレーションへ
+  </button>
+</div>
+
+<!-- SCENARIOS PAGE -->
+<div class="page" id="page-scenarios">
+  <div class="section-title">シナリオ比較</div>
+  <p style="color:var(--text2);margin-bottom:20px;font-size:.9rem;">「もしあの選択をしたら？」を比較分析します。</p>
+
+  <div class="scenario-grid" id="scenarioCards">
+    <div class="scenario-card">
+      <h4>現在のプラン</h4>
+      <div id="scBase"></div>
+    </div>
+    <div class="scenario-card" style="border-color:var(--warn)">
+      <h4>📌 配偶者退職</h4>
+      <div class="form-group" style="margin-bottom:12px">
+        <label style="font-size:.8rem;color:var(--text2)">退職年齢</label>
+        <div class="input-group"><input type="number" id="scSpouseQuit" value="40" min="30" max="65"><span>歳</span></div>
+      </div>
+      <div id="scSpouseResult"></div>
+    </div>
+    <div class="scenario-card" style="border-color:var(--accent)">
+      <h4>🏠 住宅購入</h4>
+      <div class="form-group" style="margin-bottom:8px">
+        <label style="font-size:.8rem;color:var(--text2)">購入価格</label>
+        <div class="input-group"><input type="number" id="scHousePrice" value="4000" min="1000"><span>万円</span></div>
+      </div>
+      <div class="form-group" style="margin-bottom:12px">
+        <label style="font-size:.8rem;color:var(--text2)">購入年齢</label>
+        <div class="input-group"><input type="number" id="scHouseAge" value="38" min="25" max="60"><span>歳</span></div>
+      </div>
+      <div id="scHouseResult"></div>
+    </div>
+    <div class="scenario-card" style="border-color:var(--accent2)">
+      <h4>🌿 地方移住</h4>
+      <div class="form-group" style="margin-bottom:12px">
+        <label style="font-size:.8rem;color:var(--text2)">年間支出削減額</label>
+        <div class="input-group"><input type="number" id="scRuralSave" value="100" min="0"><span>万円</span></div>
+      </div>
+      <div id="scRuralResult"></div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:12px;margin-bottom:24px;">
+    <button class="btn-primary" style="padding:11px 24px;border-radius:8px;" onclick="runComparison()">比較実行</button>
+  </div>
+
+  <div id="scenarioLoading" class="loading" style="display:none">
+    <div class="spinner"></div>AIがシナリオを分析中...
+  </div>
+
+  <div id="scAiCard" class="ai-report-card" style="display:none">
+    <div class="section-title">🤖 AIシナリオ分析</div>
+    <div class="report-body" id="scAiBody"></div>
+    <div class="disclaimer">本レポートは情報提供を目的としており、投資助言ではありません。</div>
+  </div>
+</div>
+
+<!-- BUDGET PAGE -->
+<div class="page" id="page-budget">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+    <div class="section-title" style="margin:0">💰 今月の予算管理</div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input type="month" id="budgetMonth" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:8px;font-size:.85rem;" onchange="loadBudget()">
+      <button class="btn-secondary" style="padding:6px 14px;border-radius:8px;font-size:.85rem;" onclick="showCategorySetup()">＋ カテゴリ</button>
+    </div>
+  </div>
+
+  <!-- 月全体サマリー -->
+  <div class="budget-header" id="budgetSummaryHeader" style="display:none">
+    <div>
+      <div style="font-size:.8rem;color:var(--text2);margin-bottom:4px">今月 使える残り</div>
+      <div class="total-remaining" id="totalRemaining">—</div>
+      <div style="font-size:.82rem;color:var(--text2);margin-top:4px" id="budgetSubtext"></div>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:.8rem;color:var(--text2);margin-bottom:6px">予算合計 <span id="totalBudget">—</span>円</div>
+      <div style="display:flex;gap:16px;font-size:.82rem;">
+        <span>確定 <strong id="totalConfirmed" style="color:var(--text)">—</strong>円</span>
+        <span>仮計上 <strong id="totalProvisional" style="color:#ff9f43">—</strong>円</span>
+      </div>
+      <!-- 全体進捗バー -->
+      <div class="budget-progress" style="width:220px;margin-top:10px;">
+        <div class="budget-progress-bar" id="totalProgressBar" style="width:0%;background:var(--accent2)"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 仮計上クイック追加フォーム -->
+  <div class="quick-add-form" id="quickAddForm" style="display:none">
+    <div style="font-size:.9rem;font-weight:600;margin-bottom:12px">＋ 仮計上を追加</div>
+    <div class="quick-add-row">
+      <div class="form-group" style="margin:0">
+        <label style="font-size:.78rem">カテゴリ</label>
+        <select id="qaCategory" style="width:100%;padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.88rem;"></select>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label style="font-size:.78rem">内容</label>
+        <input type="text" id="qaDesc" placeholder="例: 沖縄旅行ホテル" style="width:100%;padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.88rem;">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label style="font-size:.78rem">金額（円）</label>
+        <input type="number" id="qaAmount" placeholder="30000" style="width:120px;padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.88rem;">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label style="font-size:.78rem">日付</label>
+        <input type="date" id="qaDate" style="padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.88rem;">
+      </div>
+      <button class="btn-primary" style="padding:8px 18px;border-radius:8px;align-self:flex-end;" onclick="addProvisionalEntry()">追加</button>
+    </div>
+    <div id="qaAlert" style="margin-top:8px;"></div>
+  </div>
+
+  <!-- カテゴリ別カード -->
+  <div class="budget-cats" id="budgetCats"></div>
+
+  <!-- MF CSV 照合 -->
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:24px;" id="reconcileSection" style="display:none">
+    <div class="section-title" style="font-size:1rem;margin-bottom:8px">マネーフォワード CSV で確定</div>
+    <p style="font-size:.84rem;color:var(--text2);margin-bottom:14px">
+      MFの「家計簿」CSVをエクスポートしてアップロードすると、仮計上と自動照合します。<br>
+      日付±3日・金額±10%の範囲で一致したものを「確定」に昇格させます。
+    </p>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <select id="reconcileCategory" style="padding:7px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.85rem;"></select>
+      <label class="btn-secondary" style="padding:7px 16px;border-radius:8px;font-size:.85rem;cursor:pointer;">
+        CSVを選択
+        <input type="file" accept=".csv" style="display:none" onchange="runReconcile(this)">
+      </label>
+    </div>
+    <div id="reconcileResult" style="margin-top:12px;"></div>
+  </div>
+
+  <!-- カテゴリ設定モーダル -->
+  <div id="categoryModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;display:none;align-items:center;justify-content:center;">
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:28px;width:360px;max-width:90vw;">
+      <div style="font-size:1.1rem;font-weight:600;margin-bottom:20px">カテゴリを追加</div>
+      <div class="form-group">
+        <label>名前</label>
+        <input type="text" id="catName" placeholder="例: 旅行費、お小遣い（夫）">
+      </div>
+      <div class="form-group">
+        <label>アイコン（絵文字）</label>
+        <input type="text" id="catIcon" value="💴" maxlength="2" style="width:80px">
+      </div>
+      <div class="form-group">
+        <label>月次予算（円）</label>
+        <input type="number" id="catBudget" placeholder="50000">
+      </div>
+      <div class="form-group">
+        <label>カラー</label>
+        <input type="color" id="catColor" value="#6c63ff" style="height:36px;width:80px;padding:2px;border-radius:6px;border:none;">
+      </div>
+      <div style="display:flex;gap:10px;margin-top:8px;">
+        <button class="btn-primary" style="flex:1;padding:10px;border-radius:8px;" onclick="saveCategory()">保存</button>
+        <button class="btn-secondary" style="flex:1;padding:10px;border-radius:8px;" onclick="closeCategoryModal()">キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="budgetEmptyState" style="display:none;text-align:center;padding:60px 20px;color:var(--text2);">
+    <div style="font-size:3rem;margin-bottom:12px">📋</div>
+    <div style="font-size:1rem;margin-bottom:8px">予算カテゴリがありません</div>
+    <div style="font-size:.85rem;margin-bottom:20px">旅行費・お小遣い・外食費などを設定しましょう</div>
+    <button class="btn-primary" style="padding:10px 28px;border-radius:8px;" onclick="showCategorySetup()">カテゴリを追加する</button>
+  </div>
+</div>
+
+<!-- HOUSEHOLD ANALYSIS PAGE -->
+<div class="page" id="page-household">
+  <div class="section-title">🏠 家計分析</div>
+  <p style="color:var(--text2);margin-bottom:20px;font-size:.9rem;">マネーフォワードの入出金明細CSVをインポートして、カテゴリ別支出・前年同月比・AI削減提案を確認できます。</p>
+
+  <!-- CSV インポート -->
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;">
+    <div style="font-size:1rem;font-weight:600;margin-bottom:8px;">📂 マネーフォワードCSVのインポート</div>
+    <div style="font-size:.82rem;color:var(--text2);margin-bottom:14px;line-height:1.7;">
+      マネーフォワード ME → 「家計簿」→「入出金明細」→ CSVダウンロード<br>
+      複数月分をまとめてインポートできます。前年同月比には<strong style="color:var(--text)">1年以上のデータ</strong>が必要です。
+    </div>
+    <div class="upload-zone" onclick="document.getElementById('mfCsvInput').click()" style="max-width:420px;">
+      <input type="file" id="mfCsvInput" accept=".csv,.tsv,.txt" onchange="importMfCsv(this)">
+      <div style="font-size:1.8rem;margin-bottom:6px;">📊</div>
+      <div>クリックしてCSVを選択</div>
+      <div style="color:var(--text2);font-size:.8rem;margin-top:4px;">入出金明細CSV（タブ区切り）</div>
+    </div>
+    <div id="mfImportResult" style="margin-top:12px;"></div>
+  </div>
+
+  <!-- 月選択 + 分析ボタン -->
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:20px;display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;">
+    <div class="form-group" style="margin:0;flex:1;min-width:160px;">
+      <label>分析する月</label>
+      <select id="hhYear" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:.9rem;width:100%;"></select>
+    </div>
+    <div class="form-group" style="margin:0;flex:1;min-width:120px;">
+      <label>　</label>
+      <select id="hhMonth" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:.9rem;width:100%;">
+        <option value="1">1月</option><option value="2">2月</option><option value="3">3月</option>
+        <option value="4">4月</option><option value="5">5月</option><option value="6">6月</option>
+        <option value="7">7月</option><option value="8">8月</option><option value="9">9月</option>
+        <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option>
+      </select>
+    </div>
+    <button class="btn-primary" style="padding:10px 24px;border-radius:8px;" onclick="loadHouseholdSummary()">集計する</button>
+    <button class="btn-secondary" style="padding:10px 24px;border-radius:8px;" onclick="runHouseholdAI()" id="hhAiBtn" disabled>🤖 AI削減提案</button>
+  </div>
+
+  <div id="hhAlert"></div>
+  <div id="hhLoading" class="loading" style="display:none"><div class="spinner"></div>集計中...</div>
+
+  <!-- サマリーカード -->
+  <div id="hhSummaryCards" style="display:none">
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px;" id="hhKpiCards"></div>
+
+    <!-- カテゴリ別支出チャート -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;">
+        <div style="font-weight:600;margin-bottom:4px;">💳 カテゴリ別支出</div>
+        <div style="font-size:.78rem;color:var(--text2);margin-bottom:12px;" id="hhChartSub"></div>
+        <canvas id="hhCategoryChart" style="max-height:300px"></canvas>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;">
+        <div style="font-weight:600;margin-bottom:4px;">📊 前年同月比較</div>
+        <div style="font-size:.78rem;color:var(--text2);margin-bottom:12px;">±10%以上の変化を色分けして表示</div>
+        <div id="hhYoyTable" style="max-height:320px;overflow-y:auto;"></div>
+      </div>
+    </div>
+
+    <!-- AI提案パネル -->
+    <div id="hhAiPanel" style="display:none;background:linear-gradient(135deg,rgba(108,99,255,.1),rgba(0,212,170,.07));border:1px solid rgba(108,99,255,.3);border-radius:var(--radius);padding:24px;margin-bottom:20px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+        <div style="font-size:1.1rem;font-weight:700;">🤖 AI家計分析・削減提案</div>
+        <div id="hhAiLoading" class="loading" style="display:none;padding:0;background:none"><div class="spinner" style="width:18px;height:18px;border-width:2px;"></div></div>
+      </div>
+      <div id="hhAiReport" style="font-size:.9rem;line-height:1.8;white-space:pre-wrap;color:var(--text2);"></div>
+      <div style="font-size:.75rem;color:var(--text2);margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">本レポートは情報提供を目的としており、投資助言ではありません。</div>
+    </div>
+  </div>
+</div>
+
+<!-- HISTORY PAGE -->
+<div class="page" id="page-history">
+  <div class="section-title">シミュレーション履歴</div>
+  <p style="color:var(--text2);margin-bottom:20px;font-size:.9rem;">毎月の実行結果を記録。資産の進捗を追いかけましょう。</p>
+  <div class="history-list" id="historyList"></div>
+</div>
+
+<script>
+const API = window.location.port === '3001' ? 'http://localhost:8002/api' : '/api';
+let token = localStorage.getItem('fc_token') || '';
+let lastResult = null;
+let lastExplanation = null;
+let assetsChartInst = null;
+let incomeChartInst = null;
+let authMode = 'login'; // or 'register'
+
+// ===== UTILS =====
+async function api(method, path, body, isFile = false) {
+  const opts = {
+    method,
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  };
+  if (body && !isFile) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  } else if (isFile) {
+    opts.body = body;
+  }
+  const r = await fetch(API + path, opts);
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.detail || 'エラーが発生しました');
+  return data;
+}
+
+function showAlert(id, msg, type = 'error') {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
+  setTimeout(() => el.innerHTML = '', 5000);
+}
+
+function fmt(n) {
+  if (n === null || n === undefined) return '—';
+  return Number(n).toLocaleString();
+}
+
+// ===== NAV =====
+function showPage(p) {
+  document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.nav-links button').forEach(el => el.classList.remove('active'));
+  document.getElementById('page-' + p)?.classList.add('active');
+  document.querySelector(`[data-page="${p}"]`)?.classList.add('active');
+
+  if (p === 'history') loadHistory();
+  if (p === 'dashboard' && token) loadLastSimulation();
+  if (p === 'budget' && token) { initBudgetMonth(); loadBudget(); }
+  if (p === 'household' && token) initHouseholdPage();
+}
+
+function updateNav() {
+  const authArea = document.getElementById('authArea');
+  if (token) {
+    authArea.innerHTML = `<button class="btn-secondary" onclick="logout()">ログアウト</button>`;
+  } else {
+    authArea.innerHTML = `<button class="btn-primary" onclick="showPage('auth')">ログイン</button>`;
+  }
+}
+
+// ===== AUTH =====
+function toggleAuthMode() {
+  authMode = authMode === 'login' ? 'register' : 'login';
+  document.getElementById('authTitle').textContent = authMode === 'login' ? 'ログイン' : '新規登録';
+  document.getElementById('authBtnText').textContent = authMode === 'login' ? 'ログイン' : '登録する';
+  document.getElementById('authToggleText').textContent = authMode === 'login' ? 'アカウントがない方は' : 'すでにアカウントがある方は';
+}
+
+async function submitAuth() {
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  if (!email || !password) return showAlert('authAlert', 'メールアドレスとパスワードを入力してください');
+  try {
+    const path = authMode === 'login' ? '/auth/login' : '/auth/register';
+    const data = await api('POST', path, { email, password });
+    token = data.access_token;
+    localStorage.setItem('fc_token', token);
+    updateNav();
+    showPage('dashboard');
+  } catch (e) {
+    showAlert('authAlert', e.message);
+  }
+}
+
+function logout() {
+  token = '';
+  localStorage.removeItem('fc_token');
+  updateNav();
+  showPage('auth');
+}
+
+// ===== PROFILE =====
+async function loadProfile() {
+  if (!token) return;
+  try {
+    const p = await api('GET', '/profile/');
+    document.getElementById('pAge').value = p.age || '';
+    document.getElementById('pSpouseAge').value = p.spouse_age || '';
+    document.getElementById('pChildren').value = (p.children_ages || []).join(',');
+    document.getElementById('pIncome').value = p.annual_income || '';
+    document.getElementById('pSpouseIncome').value = p.spouse_income || 0;
+    document.getElementById('pExpense').value = p.annual_expense || '';
+    document.getElementById('pCashAssets').value = p.cash_assets || '';
+    document.getElementById('pInvestAssets').value = p.investment_assets || '';
+    document.getElementById('pMonthlyInvest').value = p.monthly_investment || '';
+    document.getElementById('pFireAge').value = p.fire_target_age || '';
+    document.getElementById('pRetAge').value = p.retirement_age || 65;
+    document.getElementById('pReturnRate').value = p.investment_return_rate || 5;
+    document.getElementById('pInflation').value = p.inflation_rate || 2;
+    document.getElementById('pEduType').value = p.education_type || 'public';
+  } catch (e) { /* 未設定の場合はスルー */ }
+}
+
+async function saveProfile() {
+  const children = document.getElementById('pChildren').value.trim();
+  const payload = {
+    age: parseInt(document.getElementById('pAge').value),
+    spouse_age: parseInt(document.getElementById('pSpouseAge').value) || null,
+    children_ages: children ? children.split(',').map(x => parseInt(x.trim())).filter(Boolean) : [],
+    annual_income: parseInt(document.getElementById('pIncome').value),
+    spouse_income: parseInt(document.getElementById('pSpouseIncome').value) || 0,
+    annual_expense: parseInt(document.getElementById('pExpense').value),
+    cash_assets: parseInt(document.getElementById('pCashAssets').value) || 0,
+    investment_assets: parseInt(document.getElementById('pInvestAssets').value) || 0,
+    monthly_investment: parseInt(document.getElementById('pMonthlyInvest').value),
+    fire_target_age: parseInt(document.getElementById('pFireAge').value) || null,
+    retirement_age: parseInt(document.getElementById('pRetAge').value) || 65,
+    investment_return_rate: parseFloat(document.getElementById('pReturnRate').value) || 5,
+    inflation_rate: parseFloat(document.getElementById('pInflation').value) || 2,
+    education_type: document.getElementById('pEduType').value || 'public',
+  };
+  if (!payload.age || !payload.annual_income || !payload.annual_expense || (!payload.cash_assets && !payload.investment_assets)) {
+    showAlert('profileAlert', '年齢・年収・支出・資産（現金または投資）は必須です');
+    return;
+  }
+  try {
+    await api('PUT', '/profile/', payload);
+    showAlert('profileAlert', '保存しました', 'success');
+    setTimeout(() => { showPage('dashboard'); runSimulation(); }, 800);
+  } catch (e) {
+    showAlert('profileAlert', e.message);
+  }
+}
+
+async function uploadCSV(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await api('POST', '/simulate/upload-csv', fd, true);
+    const p = r.parsed;
+    let msg = `📊 取込完了 (${p.source})<br>`;
+    if (p.total_assets_man) {
+      msg += `総資産: ${fmt(p.total_assets_man)}万円（投資欄に反映）`;
+      document.getElementById('pInvestAssets').value = p.total_assets_man;
+    }
+    if (p.investment_assets_man) {
+      msg += `投資資産: ${fmt(p.investment_assets_man)}万円`;
+      document.getElementById('pInvestAssets').value = p.investment_assets_man;
+    }
+    document.getElementById('csvResult').innerHTML = `<div class="alert alert-success">${msg}</div>`;
+  } catch (e) {
+    document.getElementById('csvResult').innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+  }
+}
+
+// ===== SIMULATION =====
+async function runSimulation() {
+  if (!token) { showPage('auth'); return; }
+  document.getElementById('dashLoading').style.display = 'flex';
+  document.getElementById('aiReportCard').style.display = 'none';
+  document.getElementById('dashAlert').innerHTML = '';
+  try {
+    const data = await api('POST', '/simulate/run');
+    lastResult = data.result;
+    lastExplanation = data.explanation || null;
+    renderDashboard(data.result, data.ai_report);
+    if (lastExplanation) renderExplanation(lastExplanation);
+    const badge = document.getElementById('lastUpdatedBadge');
+    badge.textContent = '更新 ' + new Date().toLocaleDateString('ja-JP');
+    badge.className = 'badge badge-new';
+  } catch (e) {
+    if (e.message.includes('プロフィール')) {
+      showAlert('dashAlert', 'プロフィールを設定してからシミュレーションを実行してください');
+      showPage('profile');
+    } else {
+      showAlert('dashAlert', e.message);
+    }
+  } finally {
+    document.getElementById('dashLoading').style.display = 'none';
+  }
+}
+
+async function loadLastSimulation() {
+  try {
+    const hist = await api('GET', '/simulate/history');
+    if (hist.length > 0) {
+      // 直近のKPIだけ表示（詳細は再実行）
+      const h = hist[0];
+      document.getElementById('kpiFireAge').textContent = h.fire_age ? h.fire_age + '歳' : '未達';
+      document.getElementById('kpiRetAssets').textContent = fmt(h.retirement_assets_man);
+      document.getElementById('lastUpdatedBadge').textContent = '最終: ' + new Date(h.created_at).toLocaleDateString('ja-JP');
+    }
+  } catch (e) { /* 初回は無視 */ }
+}
+
+const GRADE_COMMENT = {
+  household: {
+    A: '支出管理が優秀。毎月しっかり黒字です。',
+    B: '家計は概ね健全。貯蓄率をもう少し上げられると理想的。',
+    C: '収支はほぼ均衡。支出の見直し余地があります。',
+    D: '毎月赤字の状態。支出が収入を超えています。',
+  },
+  wealth: {
+    A: '資産は力強く増加中。運用が効いています。',
+    B: '資産は着実に増えています。',
+    C: '資産はほぼ横ばい。インフレ負けに注意。',
+    D: '資産が減少中。市場要因か支出過多かを確認してください。',
+  },
+};
+
+function renderDashboard(result, aiReport) {
+  const snaps = result.snapshots;
+  const cur = snaps[0];
+
+  // ── 3指標カード ──────────────────────────────
+  document.getElementById('tricardGrid').style.display = '';
+  document.getElementById('selfIndexCard').style.display = '';
+
+  const hg = cur.household_grade || 'C';
+  const wg = cur.wealth_grade || 'C';
+  const fp = cur.fire_progress_pct ?? 0;
+
+  // ① 家計健全度
+  const hGradeEl = document.getElementById('tcHouseholdGrade');
+  hGradeEl.textContent = hg;
+  hGradeEl.className = `tc-grade grade-${hg}`;
+  const srPct = Math.round((cur.savings_rate ?? 0) * 100);
+  document.getElementById('tcHouseholdValue').textContent =
+    `貯蓄率 ${srPct}%　今年の純余剰 ${fmt(cur.net_cashflow)}万円`;
+  document.getElementById('tcHouseholdComment').textContent = GRADE_COMMENT.household[hg];
+
+  // ② 資産形成力
+  const wGradeEl = document.getElementById('tcWealthGrade');
+  wGradeEl.textContent = wg;
+  wGradeEl.className = `tc-grade grade-${wg}`;
+  const ac = cur.asset_change ?? 0;
+  document.getElementById('tcWealthValue').textContent =
+    `資産増減 ${ac >= 0 ? '+' : ''}${fmt(ac)}万円`;
+  document.getElementById('tcWealthComment').textContent = GRADE_COMMENT.wealth[wg];
+
+  // ③ 将来達成率
+  const fpGrade = fp >= 100 ? 'A' : fp >= 70 ? 'B' : fp >= 40 ? 'C' : 'D';
+  const futureGradeEl = document.getElementById('tcFutureGrade');
+  futureGradeEl.textContent = Math.round(fp) + '%';
+  futureGradeEl.className = `tc-grade grade-${fpGrade}`;
+  document.getElementById('tcFutureValue').textContent =
+    result.fire_age ? `FIRE達成予測: ${result.fire_age}歳` : 'FIRE目標未達（現状）';
+  document.getElementById('tcFutureComment').textContent =
+    fp >= 100 ? 'FIREラインを超えています。' :
+    `あと${fmt(Math.round(cur.fire_threshold - cur.assets))}万円でFIRE達成。`;
+
+  // ── 自力改善指数 ─────────────────────────────
+  const bPct = cur.behavior_pct ?? 0;
+  const mPct = Math.round(100 - bPct);
+  const bGain = cur.behavior_gain ?? 0;
+  const mGain = cur.market_gain ?? 0;
+  const totalChange = cur.asset_change ?? 0;
+
+  document.getElementById('selfIndexBadge').textContent = `行動貢献 ${Math.round(bPct)}%`;
+  document.getElementById('behaviorBar').style.width = Math.round(bPct) + '%';
+  document.getElementById('selfBehaviorLabel').textContent =
+    `行動要因: ${bGain >= 0 ? '+' : ''}${fmt(bGain)}万円（${Math.round(bPct)}%）`;
+  document.getElementById('selfMarketLabel').textContent =
+    `市場要因: ${mGain >= 0 ? '+' : ''}${fmt(mGain)}万円（${mPct}%）`;
+
+  // 自力改善メッセージ（行動科学的フィードバック）
+  let msg = '';
+  if (totalChange >= 0 && bGain >= 0) {
+    msg = `✅ 今年は資産が <strong>${fmt(totalChange)}万円</strong> 増えました。<br>
+      うち市場上昇によるものが <strong>${fmt(mGain)}万円（${mPct}%）</strong>、
+      あなた自身の行動（収支管理・積立）によるものが <strong>${fmt(bGain)}万円（${Math.round(bPct)}%）</strong> です。`;
+  } else if (totalChange < 0 && bGain >= 0) {
+    msg = `📉 今年は資産が <strong>${fmt(Math.abs(totalChange))}万円</strong> 減りましたが、
+      <strong>あなたの行動は正しい</strong> です。<br>
+      市場下落が <strong>${fmt(Math.abs(mGain))}万円</strong> の損失をもたらしましたが、
+      あなた自身は <strong>+${fmt(bGain)}万円</strong> 稼ぎ出しています。積立を続けましょう。`;
+  } else if (totalChange >= 0 && bGain < 0) {
+    msg = `⚠️ 資産は <strong>${fmt(totalChange)}万円</strong> 増えましたが、
+      <strong>家計は赤字（${fmt(Math.abs(bGain))}万円の取り崩し）</strong> です。<br>
+      市場上昇が問題を隠しています。支出の見直しが必要です。`;
+  } else {
+    msg = `🔴 資産が <strong>${fmt(Math.abs(totalChange))}万円</strong> 減り、
+      家計も <strong>${fmt(Math.abs(bGain))}万円の赤字</strong> です。<br>
+      支出の根本的な見直しが必要です。`;
+  }
+  document.getElementById('selfIndexMessage').innerHTML = msg;
+
+  // ── KPI（サブ指標として残す） ─────────────────
+  document.getElementById('kpiFireAge').textContent = result.fire_age ? result.fire_age + '歳' : '未達';
+  document.getElementById('kpiFireSub').textContent = result.fire_possible ? '✅ 目標達成' : '要改善';
+  document.getElementById('kpiRetAssets').textContent = fmt(result.retirement_assets_man);
+  const diff = result.vs_benchmark_diff_man;
+  const diffEl = document.getElementById('kpiBench');
+  diffEl.textContent = (diff >= 0 ? '+' : '') + fmt(diff) + '万円';
+  diffEl.style.color = diff >= 0 ? 'var(--accent2)' : 'var(--warn)';
+  document.getElementById('kpiShortfall').textContent = fmt(result.shortfall_man);
+
+  // ── FIRE Meter ───────────────────────────────
+  const threshold = cur.fire_threshold || cur.total_expense_real * 25;
+  const pct = Math.min(100, Math.round(cur.assets / threshold * 100));
+  document.getElementById('fireMeterWrap').style.display = '';
+  document.getElementById('fireBar').style.width = pct + '%';
+  document.getElementById('firePct').textContent = pct + '%';
+  document.getElementById('fireThreshold').textContent = `目標: ${fmt(Math.round(threshold))}万円（4%ルール）`;
+  const fireBar = document.getElementById('fireBar');
+  fireBar.style.background = pct >= 100
+    ? 'var(--accent2)'
+    : pct >= 70
+    ? 'linear-gradient(90deg,var(--accent),var(--accent2))'
+    : 'linear-gradient(90deg,var(--warn),var(--accent))';
+
+  // ── ライフステージ（詳細モードのみ） ──────────
+  renderLifeStages(result);
+
+  // ── Charts ────────────────────────────────────
+  const every5 = snaps.filter((_, i) => i % 5 === 0);
+  const every2 = snaps.filter((_, i) => i % 2 === 0);
+  const ageFrom = snaps[0]?.age ?? '—';
+  const ageTo = snaps[snaps.length - 1]?.age ?? '—';
+  const yearFrom = snaps[0]?.year ?? '—';
+  const yearTo = snaps[snaps.length - 1]?.year ?? '—';
+  const retAge = result.retirement_age_used ?? 65;
+  document.getElementById('assetsChartSub').textContent =
+    `${ageFrom}〜${ageTo}歳（${yearFrom}〜${yearTo}年）の将来予測。${retAge}歳以降は年金+取り崩しフェーズ。紫＝予測資産、赤点線＝FIRE達成ライン`;
+  document.getElementById('expenseChartSub').textContent =
+    `${ageFrom}〜${ageTo}歳の支出予測（インフレ${(result.inflation_rate ?? 2)}%考慮）。赤＝教育費、紫＝生活費。教育費は子供の学校ステージごとに変化`;
+  document.getElementById('cashflowChartSub').textContent =
+    `毎年の「収入−支出−投資」の純余剰。緑＝黒字年、赤＝赤字年。赤が続く年齢帯が生活上の「かかり時」`;
+  renderAssetsChart(every5);
+  renderExpenseChart(every2);
+  renderCashflowChart(every2);
+  renderIncomeChart(cur);
+
+  // ── AI Report（詳細モードのみ） ───────────────
+  if (aiReport) {
+    document.getElementById('aiReportBody').textContent = aiReport;
+    if (viewMode === 'detail') document.getElementById('aiReportCard').style.display = '';
+  }
+
+  setViewMode(viewMode);
+}
+
+function renderLifeStages(result) {
+  const wrap = document.getElementById('lifestageWrap');
+  wrap.style.display = '';
+
+  const ls = result.life_stages || {};
+  const infoEl = document.getElementById('lifestageInfo');
+
+  const cards = [
+    {
+      icon: '💰',
+      label: '稼ぎ時ピーク',
+      value: ls.peak_earn_ages?.length ? ls.peak_earn_ages.map(a => a + '歳').join('・') : '—',
+      desc: '収入が高く貯蓄しやすい時期',
+      color: 'var(--accent2)',
+    },
+    {
+      icon: '📚',
+      label: '教育費ピーク',
+      value: ls.education_peak_age ? ls.education_peak_age + '歳' : '—',
+      desc: `最大 ${fmt(ls.education_peak_cost_man)}万円/年`,
+      color: 'var(--warn)',
+    },
+    {
+      icon: '⚠️',
+      label: 'かかり時ピーク',
+      value: ls.peak_expense_ages?.length ? ls.peak_expense_ages.map(a => a + '歳').join('・') : '—',
+      desc: '支出が収入を圧迫しやすい時期',
+      color: '#ff9f43',
+    },
+  ];
+
+  infoEl.innerHTML = cards.map(c => `
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;">
+      <div style="font-size:1.4rem;margin-bottom:6px">${c.icon}</div>
+      <div style="font-size:.8rem;color:var(--text2);margin-bottom:4px">${c.label}</div>
+      <div style="font-size:1.1rem;font-weight:700;color:${c.color}">${c.value}</div>
+      <div style="font-size:.78rem;color:var(--text2);margin-top:4px">${c.desc}</div>
+    </div>
+  `).join('');
+
+  // フェーズタイムライン
+  const timeline = result.phase_timeline || [];
+  const tlEl = document.getElementById('phaseTimeline');
+  const phaseColor = {
+    '稼ぎ時': '#00d4aa',
+    'かかり時': '#ff6b6b',
+    '安定期': '#6c63ff',
+    '老後準備期': '#8888cc',
+    '老後': '#555577',
+  };
+  if (timeline.length) {
+    const minAge = timeline[0].age;
+    const maxAge = timeline[timeline.length - 1].age;
+    const span = maxAge - minAge || 1;
+    // バー
+    const bars = timeline.map(p => {
+      const col = phaseColor[p.phase] || '#3a3d52';
+      const pct = Math.abs(p.urgency) > 50 ? '1' : '0.7';
+      return `<div title="${p.age}歳: ${p.phase}（スコア${p.urgency > 0 ? '+' : ''}${p.urgency}）" style="flex:1;background:${col};opacity:${pct};min-width:2px;cursor:default;transition:opacity .15s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='${pct}'"></div>`;
+    }).join('');
+    // 年齢目盛り
+    const ticks = [];
+    for (let age = Math.ceil(minAge / 5) * 5; age <= maxAge; age += 5) {
+      const pos = ((age - minAge) / span * 100).toFixed(1);
+      ticks.push(`<div style="position:absolute;left:${pos}%;transform:translateX(-50%);font-size:.68rem;color:var(--text2);white-space:nowrap;">${age}歳</div>`);
+    }
+    tlEl.innerHTML = `
+      <div style="display:flex;height:28px;border-radius:4px;overflow:hidden;border:1px solid var(--border)">${bars}</div>
+      <div style="position:relative;height:18px;margin-top:2px">${ticks.join('')}</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;">
+        ${Object.entries(phaseColor).map(([name, col]) =>
+          `<div style="display:flex;align-items:center;gap:4px;font-size:.75rem;color:var(--text2)"><span style="width:10px;height:10px;border-radius:2px;background:${col};display:inline-block"></span>${name}</div>`
+        ).join('')}
+      </div>`;
+  } else {
+    tlEl.innerHTML = '<div style="color:var(--text2);font-size:.82rem;">タイムラインデータなし</div>';
+  }
+
+  // イベントリスト
+  const events = result.all_events || [];
+  const evEl = document.getElementById('eventList');
+  if (!events.length) {
+    evEl.innerHTML = '<div style="color:var(--text2);font-size:.85rem">ライフイベントなし（子供なし・住宅購入なし）</div>';
+    return;
+  }
+  const severity_icon = { high: '🔴', medium: '🟡', low: '🟢' };
+  evEl.innerHTML = events.flatMap(y =>
+    y.events.map(e => {
+      const col = e.impact_man < 0 ? 'var(--warn)' : 'var(--accent2)';
+      const sign = e.impact_man < 0 ? '−' : '+';
+      return `
+        <div style="display:flex;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)">
+          <div style="min-width:52px;font-size:.82rem;color:var(--accent);font-weight:600">${y.age}歳</div>
+          <div style="font-size:.85rem;flex:1">${severity_icon[e.severity] || '•'} ${e.label}</div>
+          <div style="font-size:.82rem;color:${col};font-weight:600;white-space:nowrap">
+            ${sign}${fmt(Math.abs(e.impact_man))}万円
+          </div>
+        </div>`;
+    })
+  ).join('');
+}
+
+// ===== CHARTS =====
+let chartInsts = {};
+function destroyChart(id) { if (chartInsts[id]) { chartInsts[id].destroy(); delete chartInsts[id]; } }
+
+const CHART_OPTS = {
+  responsive: true,
+  plugins: { legend: { labels: { color: '#8b90a7', boxWidth: 12 } } },
+  scales: {
+    x: { ticks: { color: '#8b90a7', maxTicksLimit: 8 }, grid: { color: '#2e3248' } },
+    y: { ticks: { color: '#8b90a7', callback: v => {
+      if (v === 0) return '0万';
+      if (v >= 10000) return (Math.round(v / 1000) / 10) + '億';
+      return fmt(Math.round(v)) + '万';
+    }}, grid: { color: '#2e3248' } },
+  },
+};
+
+function renderAssetsChart(snaps) {
+  destroyChart('assetsChart');
+  chartInsts['assetsChart'] = new Chart(document.getElementById('assetsChart'), {
+    type: 'line',
+    data: {
+      labels: snaps.map(s => s.age + '歳'),
+      datasets: [
+        {
+          label: '予測資産',
+          data: snaps.map(s => s.assets),
+          borderColor: '#6c63ff',
+          backgroundColor: 'rgba(108,99,255,.12)',
+          fill: true, tension: 0.3, pointRadius: 3,
+        },
+        {
+          label: 'FIRE目標額',
+          data: snaps.map(s => s.fire_threshold),
+          borderColor: '#ff6b6b',
+          borderDash: [6, 3],
+          pointRadius: 0,
+          fill: false, tension: 0.3,
+        },
+      ],
+    },
+    options: { ...CHART_OPTS },
+  });
+}
+
+function renderExpenseChart(snaps) {
+  destroyChart('expenseChart');
+  chartInsts['expenseChart'] = new Chart(document.getElementById('expenseChart'), {
+    type: 'bar',
+    data: {
+      labels: snaps.map(s => s.age + '歳'),
+      datasets: [
+        {
+          label: '生活費',
+          data: snaps.map(s => s.living_expense_real),
+          backgroundColor: 'rgba(108,99,255,.7)',
+          stack: 'exp',
+        },
+        {
+          label: '教育費',
+          data: snaps.map(s => s.education_expense_real),
+          backgroundColor: 'rgba(255,107,107,.8)',
+          stack: 'exp',
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { labels: { color: '#8b90a7', boxWidth: 12 } } },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8b90a7', maxTicksLimit: 8 }, grid: { color: '#2e3248' } },
+        y: { stacked: true, ticks: { color: '#8b90a7', callback: v => {
+          if (v === 0) return '0万';
+          if (v >= 10000) return (Math.round(v / 1000) / 10) + '億';
+          return fmt(Math.round(v)) + '万';
+        }}, grid: { color: '#2e3248' } },
+      },
+    },
+  });
+}
+
+function renderCashflowChart(snaps) {
+  destroyChart('cashflowChart');
+  chartInsts['cashflowChart'] = new Chart(document.getElementById('cashflowChart'), {
+    type: 'bar',
+    data: {
+      labels: snaps.map(s => s.age + '歳'),
+      datasets: [{
+        label: '純余剰（収入−支出−投資）',
+        data: snaps.map(s => s.net_cashflow),
+        backgroundColor: snaps.map(s => s.net_cashflow >= 0 ? 'rgba(0,212,170,.7)' : 'rgba(255,107,107,.7)'),
+      }],
+    },
+    options: {
+      ...CHART_OPTS,
+      plugins: {
+        legend: { labels: { color: '#8b90a7' } },
+        annotation: { annotations: { zero: { type: 'line', yMin: 0, yMax: 0, borderColor: '#ffffff30', borderWidth: 1 } } },
+      },
+    },
+  });
+}
+
+function renderIncomeChart(snap) {
+  destroyChart('incomeChart');
+  const invest = snap.investment || 0;
+  const expense = (snap.total_expense_real || snap.expense || 0);
+  const income = snap.total_income_nominal || snap.income || 0;
+  const saving = Math.max(0, income - expense - invest);
+  chartInsts['incomeChart'] = new Chart(document.getElementById('incomeChart'), {
+    type: 'doughnut',
+    data: {
+      labels: ['生活費+教育費', '投資', '余剰貯蓄'],
+      datasets: [{ data: [expense, invest, saving], backgroundColor: ['#ff6b6b', '#6c63ff', '#00d4aa'], borderWidth: 0 }],
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#8b90a7', padding: 12, boxWidth: 12 } },
+        tooltip: { callbacks: { label: c => fmt(Math.round(c.parsed)) + '万円' } },
+      },
+    },
+  });
+}
+
+// ===== VIEW MODE (ざっくり / 詳細) =====
+let viewMode = 'detail'; // 'simple' | 'detail'  ← detail がデフォルト
+
+// ===== OPTIMISTIC / PESSIMISTIC SCENARIOS =====
+let optimisticResult = null;
+let pessimisticResult = null;
+
+async function runOutlookScenarios() {
+  if (!token) return;
+  document.getElementById('outlookLoading').style.display = 'flex';
+  document.getElementById('outlookCards').style.display = 'none';
+  try {
+    const scenarios = [
+      { name: '楽観シナリオ', investment_return_rate: 7.0, inflation_rate: 1.0, income_real_growth_rate: 1.5 },
+      { name: 'ベースライン', investment_return_rate: 5.0, inflation_rate: 2.0, income_real_growth_rate: 0.5 },
+      { name: '悲観シナリオ', investment_return_rate: 3.0, inflation_rate: 3.0, income_real_growth_rate: 0.0 },
+    ];
+    const data = await api('POST', '/simulate/compare', scenarios);
+    renderOutlookCards(data.comparison);
+  } catch (e) {
+    showAlert('dashAlert', e.message);
+  } finally {
+    document.getElementById('outlookLoading').style.display = 'none';
+    document.getElementById('outlookCards').style.display = '';
+  }
+}
+
+function renderOutlookCards(comparison) {
+  const configs = [
+    { icon: '☀️', color: 'var(--accent2)', desc: '運用利回り7%・インフレ低め・賃上げあり' },
+    { icon: '⚖️', color: 'var(--accent)',  desc: '運用利回り5%・インフレ2%・標準的な賃上げ' },
+    { icon: '🌧️', color: 'var(--warn)',    desc: '運用利回り3%・インフレ高め・賃金横ばい' },
+  ];
+  document.getElementById('outlookCards').innerHTML = comparison.map((sc, i) => {
+    const cfg = configs[i];
+    const shortfall = sc.shortfall_man;
+    return `
+      <div class="scenario-card" style="border-color:${cfg.color}">
+        <h4>${cfg.icon} ${sc.scenario}</h4>
+        <div style="font-size:.78rem;color:var(--text2);margin-bottom:12px">${cfg.desc}</div>
+        <div class="scenario-row"><span>FIRE達成</span>
+          <span class="val ${sc.fire_age ? 'green' : 'red'}">${sc.fire_age ? sc.fire_age + '歳' : '未達'}</span></div>
+        <div class="scenario-row"><span>老後資産</span>
+          <span class="val">${fmt(sc.retirement_assets_man)}万円</span></div>
+        <div class="scenario-row"><span>教育費総額</span>
+          <span class="val">${fmt(sc.total_education_cost_man)}万円</span></div>
+        <div class="scenario-row"><span>老後過不足</span>
+          <span class="val ${shortfall > 0 ? 'red' : 'green'}">${shortfall > 0 ? '▼' + fmt(shortfall) + '万円' : '▲黒字'}</span></div>
+        <div class="scenario-row"><span>vs オルカン</span>
+          <span class="val ${sc.vs_benchmark_diff_man >= 0 ? 'green' : 'red'}">${sc.vs_benchmark_diff_man >= 0 ? '+' : ''}${fmt(sc.vs_benchmark_diff_man)}万円</span></div>
+      </div>`;
+  }).join('');
+}
+
+// ===== SCENARIO COMPARE =====
+async function runComparison() {
+  document.getElementById('scenarioLoading').style.display = 'flex';
+  document.getElementById('scAiCard').style.display = 'none';
+
+  const scenarios = [
+    { name: '現在のプラン' },
+    { name: '配偶者退職', spouse_quit_age: parseInt(document.getElementById('scSpouseQuit').value) },
+    { name: '住宅購入', buy_house: true, house_price: parseInt(document.getElementById('scHousePrice').value), house_age: parseInt(document.getElementById('scHouseAge').value) },
+    { name: '地方移住', move_to_rural: true, rural_expense_reduction: parseInt(document.getElementById('scRuralSave').value) },
+  ];
+
+  try {
+    const data = await api('POST', '/simulate/compare', scenarios);
+    renderScenarios(data.comparison);
+    document.getElementById('scAiBody').textContent = data.ai_analysis;
+    document.getElementById('scAiCard').style.display = '';
+  } catch (e) {
+    showAlert('dashAlert', e.message);
+  } finally {
+    document.getElementById('scenarioLoading').style.display = 'none';
+  }
+}
+
+function renderScenarios(comparison) {
+  const ids = ['scBase', 'scSpouseResult', 'scHouseResult', 'scRuralResult'];
+  comparison.forEach((sc, i) => {
+    const el = document.getElementById(ids[i]);
+    if (!el) return;
+    const shortfall = sc.shortfall_man;
+    el.innerHTML = `
+      <div class="scenario-row"><span>FIRE達成</span><span class="val ${sc.fire_age ? 'green' : 'red'}">${sc.fire_age ? sc.fire_age + '歳' : '未達'}</span></div>
+      <div class="scenario-row"><span>老後資産</span><span class="val">${fmt(sc.retirement_assets_man)}万円</span></div>
+      <div class="scenario-row"><span>老後不足</span><span class="val ${shortfall > 0 ? 'red' : 'green'}">${shortfall > 0 ? fmt(shortfall) + '万円' : '黒字'}</span></div>
+    `;
+  });
+}
+
+// ===== HISTORY =====
+async function loadHistory() {
+  if (!token) return;
+  try {
+    const hist = await api('GET', '/simulate/history');
+    const el = document.getElementById('historyList');
+    if (!hist.length) {
+      el.innerHTML = '<p style="color:var(--text2)">まだシミュレーション履歴がありません。</p>';
+      return;
+    }
+    el.innerHTML = hist.map(h => `
+      <div class="history-item">
+        <div>
+          <div style="font-weight:600">${h.scenario_name}</div>
+          <div class="meta">${new Date(h.created_at).toLocaleString('ja-JP')}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="color:var(--accent2);font-weight:600">${h.fire_age ? 'FIRE ' + h.fire_age + '歳' : '未達'}</div>
+          <div class="meta">老後資産 ${fmt(h.retirement_assets_man)}万円</div>
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    document.getElementById('historyList').innerHTML = `<p style="color:var(--warn)">${e.message}</p>`;
+  }
+}
+
+// ===== 計算根拠 =====
+function renderExplanation(explanation) {
+  document.getElementById('explainToggleRow').style.display = '';
+
+  const sections = {
+    fire: 'fireSteps',
+    household: 'householdSteps',
+    wealth: 'wealthSteps',
+    retirement: 'retirementSteps',
+  };
+
+  for (const [key, elId] of Object.entries(sections)) {
+    const steps = explanation[key] || [];
+    const el = document.getElementById(elId);
+    if (!el) continue;
+    el.innerHTML = steps.map((s, i) => `
+      <div class="explain-step">
+        <div class="step-title">${s.title}</div>
+        <div class="step-formula">${s.formula}</div>
+        <div class="step-calc">= ${s.calc}</div>
+        ${s.note ? `<div class="step-note">💡 ${s.note}</div>` : ''}
+      </div>
+    `).join('');
+  }
+  // 最初のアコーディオンセクションを自動展開
+  ['fireExplain', 'householdExplain'].forEach(id => {
+    const body = document.getElementById(id);
+    const arrow = document.getElementById(id + 'Arrow');
+    if (body && !body.classList.contains('open')) {
+      body.classList.add('open');
+      if (arrow) arrow.textContent = '▲';
+    }
+  });
+}
+
+// ===== VIEW MODE 統合版 =====
+function setViewMode(mode) {
+  viewMode = mode;
+
+  // ざっくり / 詳細 ボタン（ダッシュボード上部）
+  const btnS = document.getElementById('btnSimple');
+  const btnD = document.getElementById('btnDetail');
+  if (btnS) btnS.className = mode === 'simple' ? 'btn-primary' : 'btn-secondary';
+  if (btnD) btnD.className = mode === 'detail' ? 'btn-primary' : 'btn-secondary';
+
+  // 結果だけ見る / 計算ステップを見る トグル（計算根拠行）
+  document.getElementById('toggleSimple')?.classList.toggle('active', mode === 'simple');
+  document.getElementById('toggleDetail')?.classList.toggle('active', mode === 'detail');
+
+  // ライフステージ：詳細のみ表示
+  const lifestage = document.getElementById('lifestageWrap');
+  if (lifestage) lifestage.style.display = mode === 'detail' ? '' : 'none';
+
+  // 計算根拠パネル
+  const panel = document.getElementById('explainPanel');
+  if (panel) {
+    if (mode === 'detail') panel.classList.add('open');
+    else panel.classList.remove('open');
+  }
+
+  // AIレポート：シミュレーション済みかつ詳細のみ
+  const aiCard = document.getElementById('aiReportCard');
+  if (aiCard) aiCard.style.display = (lastResult && mode === 'detail') ? '' : 'none';
+}
+
+function toggleExplainSection(id) {
+  const body = document.getElementById(id);
+  const arrow = document.getElementById(id + 'Arrow');
+  const isOpen = body.classList.toggle('open');
+  if (arrow) arrow.textContent = isOpen ? '▲' : '▼';
+}
+
+// ===== BUDGET =====
+let budgetCategories = [];
+
+function initBudgetMonth() {
+  const now = new Date();
+  document.getElementById('budgetMonth').value =
+    now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+  // 今日の日付をデフォルトに
+  document.getElementById('qaDate').value = now.toISOString().slice(0, 10);
+}
+
+async function loadBudget() {
+  if (!token) return;
+  const ym = document.getElementById('budgetMonth').value;
+  if (!ym) return;
+  try {
+    const data = await api('GET', `/budget/summary?year_month=${ym}`);
+    renderBudget(data);
+  } catch (e) {
+    if (e.message.includes('404') || e.message.includes('カテゴリ')) {
+      document.getElementById('budgetEmptyState').style.display = '';
+      document.getElementById('budgetSummaryHeader').style.display = 'none';
+      document.getElementById('quickAddForm').style.display = 'none';
+      document.getElementById('budgetCats').innerHTML = '';
+    }
+  }
+  // カテゴリセレクトを更新
+  await refreshCategorySelects();
+}
+
+function renderBudget(data) {
+  budgetCategories = data.categories || [];
+
+  if (!budgetCategories.length) {
+    document.getElementById('budgetEmptyState').style.display = '';
+    document.getElementById('budgetSummaryHeader').style.display = 'none';
+    document.getElementById('quickAddForm').style.display = 'none';
+    document.getElementById('reconcileSection').style.display = 'none';
+    document.getElementById('budgetCats').innerHTML = '';
+    return;
+  }
+
+  document.getElementById('budgetEmptyState').style.display = 'none';
+  document.getElementById('budgetSummaryHeader').style.display = '';
+  document.getElementById('quickAddForm').style.display = '';
+  document.getElementById('reconcileSection').style.display = '';
+
+  // サマリーヘッダー
+  const rem = data.total_remaining;
+  const remEl = document.getElementById('totalRemaining');
+  remEl.textContent = fmt(Math.abs(rem)) + '円';
+  remEl.className = 'total-remaining ' + (rem > data.total_budget * 0.3 ? 'safe' : rem >= 0 ? 'warn' : 'over');
+
+  document.getElementById('budgetSubtext').textContent =
+    rem < 0 ? `予算を ${fmt(Math.abs(rem))}円 超過しています` :
+    `予算の ${Math.round((data.total_spent / data.total_budget) * 100)}% を使用`;
+
+  document.getElementById('totalBudget').textContent = fmt(data.total_budget);
+  document.getElementById('totalConfirmed').textContent = fmt(data.total_confirmed);
+  document.getElementById('totalProvisional').textContent = fmt(data.total_provisional);
+
+  const totalPct = data.total_budget > 0 ? Math.min(100, data.total_spent / data.total_budget * 100) : 0;
+  const pBar = document.getElementById('totalProgressBar');
+  pBar.style.width = totalPct + '%';
+  pBar.style.background = totalPct > 90 ? 'var(--warn)' : totalPct > 70 ? '#ff9f43' : 'var(--accent2)';
+
+  // カテゴリカード
+  document.getElementById('budgetCats').innerHTML = budgetCategories.map(cat => {
+    const pct = cat.usage_pct;
+    const barColor = pct > 90 ? 'var(--warn)' : pct > 70 ? '#ff9f43' : cat.color || 'var(--accent2)';
+    const entriesHtml = cat.entries.length ? cat.entries.map(e => `
+      <div class="entry-item">
+        <span class="e-status-dot ${e.status}"></span>
+        <span class="e-desc">${e.description}</span>
+        <span style="font-size:.75rem;color:var(--text2)">${e.entry_date.slice(5, 10)}</span>
+        <span class="e-amount">${fmt(e.actual_amount || e.amount)}円</span>
+        <button class="e-delete" onclick="deleteEntry('${e.id}')" title="削除">✕</button>
+      </div>
+    `).join('') : '<div style="color:var(--text2);font-size:.8rem;padding:8px 0">まだ支出がありません</div>';
+
+    return `
+      <div class="budget-cat-card">
+        <div class="cat-header">
+          <div class="cat-name">${cat.icon} ${cat.name}</div>
+          <div class="cat-budget">予算 ${fmt(cat.monthly_budget)}円</div>
+        </div>
+        <div class="budget-progress">
+          <div class="budget-progress-bar" style="width:${pct}%;background:${barColor}"></div>
+        </div>
+        <div class="budget-amounts">
+          <span class="confirmed">確定 ${fmt(cat.confirmed_total)}円</span>
+          <span class="provisional">仮 ${fmt(cat.provisional_total)}円</span>
+          <span class="remaining" style="color:${cat.remaining < 0 ? 'var(--warn)' : 'var(--accent2)'}">
+            残 ${cat.remaining < 0 ? '▼' : ''}${fmt(Math.abs(cat.remaining))}円
+          </span>
+        </div>
+        <div class="entry-list">${entriesHtml}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function refreshCategorySelects() {
+  try {
+    const cats = await api('GET', '/budget/categories');
+    budgetCategories = cats;
+    const opts = cats.map(c => `<option value="${c.id}">${c.icon} ${c.name}</option>`).join('');
+    document.getElementById('qaCategory').innerHTML = opts || '<option value="">カテゴリなし</option>';
+    document.getElementById('reconcileCategory').innerHTML = opts || '<option value="">カテゴリなし</option>';
+  } catch (e) { /* 未ログイン時は無視 */ }
+}
+
+async function addProvisionalEntry() {
+  const catId = document.getElementById('qaCategory').value;
+  const desc = document.getElementById('qaDesc').value.trim();
+  const amount = parseInt(document.getElementById('qaAmount').value);
+  const date = document.getElementById('qaDate').value;
+
+  if (!catId || !desc || !amount || !date) {
+    document.getElementById('qaAlert').innerHTML = '<div class="alert alert-error">全項目を入力してください</div>';
+    setTimeout(() => document.getElementById('qaAlert').innerHTML = '', 3000);
+    return;
+  }
+  try {
+    await api('POST', '/budget/entries', { category_id: catId, description: desc, amount, entry_date: date });
+    document.getElementById('qaDesc').value = '';
+    document.getElementById('qaAmount').value = '';
+    await loadBudget();
+  } catch (e) {
+    document.getElementById('qaAlert').innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+  }
+}
+
+async function deleteEntry(entryId) {
+  try {
+    await api('DELETE', `/budget/entries/${entryId}`);
+    await loadBudget();
+  } catch (e) { alert(e.message); }
+}
+
+function showCategorySetup() {
+  document.getElementById('categoryModal').style.display = 'flex';
+}
+function closeCategoryModal() {
+  document.getElementById('categoryModal').style.display = 'none';
+}
+
+async function saveCategory() {
+  const name = document.getElementById('catName').value.trim();
+  const icon = document.getElementById('catIcon').value.trim() || '💴';
+  const budget = parseInt(document.getElementById('catBudget').value);
+  const color = document.getElementById('catColor').value;
+
+  if (!name || !budget) { alert('名前と予算は必須です'); return; }
+  try {
+    await api('POST', '/budget/categories', { name, icon, monthly_budget: budget, color });
+    closeCategoryModal();
+    await loadBudget();
+  } catch (e) { alert(e.message); }
+}
+
+async function runReconcile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const catId = document.getElementById('reconcileCategory').value;
+  if (!catId) { alert('カテゴリを選択してください'); return; }
+  const ym = document.getElementById('budgetMonth').value;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await api('POST', `/budget/reconcile/${catId}?year_month=${ym}`, fd, true);
+    document.getElementById('reconcileResult').innerHTML = `
+      <div class="alert alert-success">
+        照合完了: 一致 <strong>${r.matched_count}件</strong>、新規確定 <strong>${r.new_confirmed_count}件</strong><br>
+        ${r.matched.map(m => `${m.description}: 仮${fmt(m.provisional_amount)}円 → 確定${fmt(m.actual_amount)}円${m.diff ? `（差額${m.diff > 0 ? '+' : ''}${fmt(m.diff)}円）` : ''}`).join('<br>')}
+      </div>`;
+    await loadBudget();
+  } catch (e) {
+    document.getElementById('reconcileResult').innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+  }
+}
+
+// ===== INIT =====
+updateNav();
+if (token) {
+  showPage('dashboard');
+  loadProfile();
+} else {
+  showPage('auth');
+}
+
+document.querySelector('[data-page="profile"]')?.addEventListener('click', loadProfile);
+document.querySelector('[data-page="household"]')?.addEventListener('click', initHouseholdPage);
+
+// ===== 家計分析 =====
+let hhCategoryChartInst = null;
+let hhCurrentSummary = null;
+
+async function initHouseholdPage() {
+  if (!token) return;
+  // 利用可能な月を取得してセレクトを構築
+  try {
+    const months = await api('GET', '/household/months');
+    const yearSel = document.getElementById('hhYear');
+    const monthSel = document.getElementById('hhMonth');
+    if (months.length) {
+      const years = [...new Set(months.map(m => m.year))].sort((a, b) => b - a);
+      yearSel.innerHTML = years.map(y => `<option value="${y}">${y}年</option>`).join('');
+      // 最新月をデフォルト選択
+      yearSel.value = months[0].year;
+      monthSel.value = months[0].month;
+    } else {
+      const now = new Date();
+      yearSel.innerHTML = `<option value="${now.getFullYear()}">${now.getFullYear()}年</option>`;
+      monthSel.value = now.getMonth() + 1;
+    }
+  } catch (e) { /* データなし時はスルー */ }
+}
+
+async function importMfCsv(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  const resultEl = document.getElementById('mfImportResult');
+  resultEl.innerHTML = '<div style="color:var(--text2);font-size:.85rem;">インポート中...</div>';
+  try {
+    const r = await api('POST', '/household/import-csv', fd, true);
+    resultEl.innerHTML = `<div class="alert alert-success">
+      ✅ インポート完了：${r.imported}件を新規追加（${r.skipped}件は重複スキップ）<br>
+      データのある月: ${r.available_months.slice(0,6).map(m => m.year+'年'+m.month+'月').join('、')}${r.available_months.length > 6 ? '...' : ''}
+    </div>`;
+    // 月セレクトを更新
+    const yearSel = document.getElementById('hhYear');
+    const years = [...new Set(r.available_months.map(m => m.year))].sort((a, b) => b - a);
+    yearSel.innerHTML = years.map(y => `<option value="${y}">${y}年</option>`).join('');
+    if (r.available_months.length) {
+      yearSel.value = r.available_months[0].year;
+      document.getElementById('hhMonth').value = r.available_months[0].month;
+    }
+  } catch (e) {
+    resultEl.innerHTML = `<div class="alert alert-error">❌ ${e.message}</div>`;
+  }
+  input.value = '';
+}
+
+async function loadHouseholdSummary() {
+  if (!token) return;
+  const year = parseInt(document.getElementById('hhYear').value);
+  const month = parseInt(document.getElementById('hhMonth').value);
+  if (!year || !month) return;
+
+  document.getElementById('hhLoading').style.display = 'flex';
+  document.getElementById('hhSummaryCards').style.display = 'none';
+  document.getElementById('hhAiPanel').style.display = 'none';
+  showAlert('hhAlert', '', '');
+
+  try {
+    const data = await api('GET', `/household/compare/${year}/${month}`);
+    hhCurrentSummary = data;
+    renderHouseholdSummary(data, year, month);
+    document.getElementById('hhSummaryCards').style.display = '';
+    document.getElementById('hhAiBtn').disabled = false;
+  } catch (e) {
+    showAlert('hhAlert', e.message);
+  } finally {
+    document.getElementById('hhLoading').style.display = 'none';
+  }
+}
+
+function renderHouseholdSummary(data, year, month) {
+  const cur = data.current;
+  const yoy = data.comparison;
+  const flagged = yoy.filter(x => x.flagged);
+
+  // KPIカード
+  const balance = cur.total_income_yen - cur.total_expense_yen;
+  const balColor = balance >= 0 ? 'var(--accent2)' : 'var(--warn)';
+  document.getElementById('hhKpiCards').innerHTML = `
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:18px;">
+      <div style="font-size:.8rem;color:var(--text2);margin-bottom:6px;">支出合計</div>
+      <div style="font-size:1.5rem;font-weight:700;color:var(--warn)">${fmtYen(cur.total_expense_yen)}</div>
+      <div style="font-size:.78rem;color:var(--text2);margin-top:4px;">${year}年${month}月</div>
+    </div>
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:18px;">
+      <div style="font-size:.8rem;color:var(--text2);margin-bottom:6px;">収入合計</div>
+      <div style="font-size:1.5rem;font-weight:700;color:var(--accent2)">${fmtYen(cur.total_income_yen)}</div>
+      <div style="font-size:.78rem;color:var(--text2);margin-top:4px;">${cur.transaction_count}件</div>
+    </div>
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:18px;">
+      <div style="font-size:.8rem;color:var(--text2);margin-bottom:6px;">収支差</div>
+      <div style="font-size:1.5rem;font-weight:700;color:${balColor}">${balance >= 0 ? '+' : ''}${fmtYen(balance)}</div>
+      <div style="font-size:.78rem;color:var(--text2);margin-top:4px;">${flagged.length > 0 ? `⚠️ 前年比変化 ${flagged.length}項目` : '前年比異常なし'}</div>
+    </div>`;
+
+  // カテゴリチャートサブタイトル
+  document.getElementById('hhChartSub').textContent =
+    `${year}年${month}月 / 計${cur.categories.length}カテゴリ`;
+
+  // カテゴリ別支出 横棒チャート
+  if (hhCategoryChartInst) { hhCategoryChartInst.destroy(); hhCategoryChartInst = null; }
+  const top10 = cur.categories.slice(0, 10);
+  hhCategoryChartInst = new Chart(document.getElementById('hhCategoryChart'), {
+    type: 'bar',
+    data: {
+      labels: top10.map(c => c.name),
+      datasets: [{
+        label: '支出（円）',
+        data: top10.map(c => c.amount_yen),
+        backgroundColor: top10.map((_, i) => `hsl(${240 + i * 15}, 65%, 60%)`),
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#8b90a7', callback: v => fmtYen(v) }, grid: { color: '#2e3248' } },
+        y: { ticks: { color: '#8b90a7' }, grid: { display: false } },
+      },
+    },
+  });
+
+  // 前年同月比テーブル
+  const prevYear = year - 1;
+  const prevHasData = data.prev_year.transaction_count > 0;
+  document.getElementById('hhYoyTable').innerHTML = prevHasData
+    ? yoy.map(row => {
+        const arrow = row.change_pct === null ? '—'
+          : row.direction === 'up' ? '▲' : '▼';
+        const pctColor = row.flagged
+          ? (row.direction === 'up' ? 'var(--warn)' : 'var(--accent2)')
+          : 'var(--text2)';
+        const flagIcon = row.flagged ? (row.direction === 'up' ? ' ⚠️' : ' ✅') : '';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);gap:8px;">
+          <div style="font-size:.82rem;flex:1">${row.category}${flagIcon}</div>
+          <div style="font-size:.8rem;color:var(--text2);min-width:70px;text-align:right">${fmtYen(row.current_yen)}</div>
+          <div style="font-size:.8rem;color:${pctColor};font-weight:600;min-width:60px;text-align:right">
+            ${row.change_pct !== null ? arrow + Math.abs(row.change_pct) + '%' : '—'}
+          </div>
+        </div>`;
+      }).join('')
+    : `<div style="color:var(--text2);font-size:.85rem;padding:20px 0;text-align:center;">
+        ${prevYear}年${month}月のデータがありません。<br>前年同月比には1年以上のデータが必要です。
+      </div>`;
+}
+
+async function runHouseholdAI() {
+  if (!token || !hhCurrentSummary) return;
+  const year = parseInt(document.getElementById('hhYear').value);
+  const month = parseInt(document.getElementById('hhMonth').value);
+
+  document.getElementById('hhAiPanel').style.display = '';
+  document.getElementById('hhAiLoading').style.display = 'flex';
+  document.getElementById('hhAiReport').textContent = 'AIが分析中です...';
+
+  try {
+    const data = await api('POST', `/household/ai-analysis/${year}/${month}`);
+    document.getElementById('hhAiReport').textContent = data.ai_report;
+  } catch (e) {
+    document.getElementById('hhAiReport').textContent = 'エラー: ' + e.message;
+  } finally {
+    document.getElementById('hhAiLoading').style.display = 'none';
+  }
+}
+
+// 円の表示フォーマット（家計分析用・円単位）
+function fmtYen(v) {
+  const abs = Math.abs(v);
+  const sign = v < 0 ? '-' : '';
+  if (abs >= 10000) return sign + Math.round(abs / 1000) / 10 + '万円';
+  return sign + abs.toLocaleString('ja-JP') + '円';
+}
+</script>
+</body>
+</html>
