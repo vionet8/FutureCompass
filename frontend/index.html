@@ -888,7 +888,7 @@
 </div>
 
 <script>
-const API = window.location.port === '3001' ? 'http://localhost:8002/api' : '/api';
+const API = '/api';
 let token = localStorage.getItem('fc_token') || '';
 let lastResult = null;
 let lastExplanation = null;
@@ -1091,8 +1091,26 @@ async function loadLastSimulation() {
       document.getElementById('kpiFireAge').textContent = h.fire_age ? h.fire_age + '歳' : '未達';
       document.getElementById('kpiRetAssets').textContent = fmt(h.retirement_assets_man);
       document.getElementById('lastUpdatedBadge').textContent = '最終: ' + new Date(h.created_at).toLocaleDateString('ja-JP');
+      return;
     }
   } catch (e) { /* 初回は無視 */ }
+
+  // 履歴なし → 初回オンボーディング案内
+  let hasProfile = true;
+  try { await api('GET', '/profile/'); } catch (e) { hasProfile = false; }
+  const el = document.getElementById('dashAlert');
+  if (!el) return;
+  if (!hasProfile) {
+    el.innerHTML = `<div class="alert alert-success" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <span>👋 ようこそ！まずプロフィール（年齢・収入・資産）を設定すると、資産推移とFIRE予測が見られます。</span>
+      <button class="btn-primary" style="padding:8px 20px;border-radius:8px;white-space:nowrap;" onclick="showPage('profile')">プロフィールを設定する</button>
+    </div>`;
+  } else {
+    el.innerHTML = `<div class="alert alert-success" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <span>プロフィール設定済みです。「シミュレーション実行」で最新の予測を表示します。</span>
+      <button class="btn-primary" style="padding:8px 20px;border-radius:8px;white-space:nowrap;" onclick="runSimulation()">シミュレーション実行</button>
+    </div>`;
+  }
 }
 
 const GRADE_COMMENT = {
@@ -1868,13 +1886,17 @@ async function initHouseholdPage() {
     if (months.length) {
       const years = [...new Set(months.map(m => m.year))].sort((a, b) => b - a);
       yearSel.innerHTML = years.map(y => `<option value="${y}">${y}年</option>`).join('');
-      // 最新月をデフォルト選択
+      // 最新月をデフォルト選択して自動集計
       yearSel.value = months[0].year;
       monthSel.value = months[0].month;
+      loadHouseholdSummary();
     } else {
       const now = new Date();
       yearSel.innerHTML = `<option value="${now.getFullYear()}">${now.getFullYear()}年</option>`;
       monthSel.value = now.getMonth() + 1;
+      document.getElementById('hhAlert').innerHTML = `<div class="alert alert-success">
+        まだデータがありません。上のドロップゾーンからマネーフォワードの入出金明細CSVをインポートしてください。
+      </div>`;
     }
   } catch (e) { /* データなし時はスルー */ }
 }
@@ -1899,6 +1921,7 @@ async function importMfCsv(input) {
     if (r.available_months.length) {
       yearSel.value = r.available_months[0].year;
       document.getElementById('hhMonth').value = r.available_months[0].month;
+      loadHouseholdSummary();  // インポート後は最新月を自動集計
     }
   } catch (e) {
     resultEl.innerHTML = `<div class="alert alert-error">❌ ${e.message}</div>`;
@@ -1995,11 +2018,13 @@ function renderHouseholdSummary(data, year, month) {
           ? (row.direction === 'up' ? 'var(--warn)' : 'var(--accent2)')
           : 'var(--text2)';
         const flagIcon = row.flagged ? (row.direction === 'up' ? ' ⚠️' : ' ✅') : '';
+        const pctLabel = row.is_new ? '新規'
+          : row.change_pct !== null ? arrow + Math.abs(row.change_pct) + '%' : '—';
         return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);gap:8px;">
           <div style="font-size:.82rem;flex:1">${row.category}${flagIcon}</div>
           <div style="font-size:.8rem;color:var(--text2);min-width:70px;text-align:right">${fmtYen(row.current_yen)}</div>
           <div style="font-size:.8rem;color:${pctColor};font-weight:600;min-width:60px;text-align:right">
-            ${row.change_pct !== null ? arrow + Math.abs(row.change_pct) + '%' : '—'}
+            ${pctLabel}
           </div>
         </div>`;
       }).join('')

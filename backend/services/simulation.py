@@ -32,7 +32,8 @@ EDU_ANNUAL_COST = {
 EDU_ENTRY_COST = {"university": {"public": 28, "private": 60}}
 
 # 収入のピーク年齢係数（国税庁「民間給与実態統計調査」基準の簡易モデル）
-# age → 現在年収に対する倍率。40-55歳がピーク
+# age → 年齢別の給与水準カーブ。40-55歳がピーク。
+# 実際の適用時は「現在年齢の係数」で正規化する（ユーザー入力＝現在の年収のため）。
 INCOME_PEAK_CURVE = {
     (20, 29): 0.72,
     (30, 34): 0.88,
@@ -42,8 +43,12 @@ INCOME_PEAK_CURVE = {
     (50, 54): 1.08,
     (55, 59): 1.02,
     (60, 64): 0.78,  # 再雇用・役職定年
-    (65, 99): 0.0,   # 退職（年金に切替）
+    (65, 69): 0.55,  # シニア継続就労（retirement_age>65の場合のみ到達）
+    (70, 99): 0.40,
 }
+
+# 年金モデルの就労開始年齢（大卒想定）
+CAREER_START_AGE = 22
 
 
 def _income_peak_factor(age: int) -> float:
@@ -67,6 +72,17 @@ def _edu_stage(child_age: int) -> Optional[str]:
     if 18 <= child_age <= 21:
         return "university"
     return None
+
+
+def _resolve_edu_type(education_type: str, stage: str) -> str:
+    """学歴タイプ×ステージから public / private を決定する"""
+    if education_type in ("mixed", "private_middle"):
+        # 小学校まで公立、中学以降私立
+        return "public" if stage in ("nursery", "preschool", "elementary") else "private"
+    if education_type == "private_high":
+        # 高校・大学のみ私立
+        return "private" if stage in ("high", "university") else "public"
+    return education_type if education_type in ("public", "private") else "public"
 
 
 # ──────────────────────────────────────────────
@@ -195,6 +211,70 @@ class YearlySnapshot:
     urgency_score: int           # -100〜+100（+が稼ぎ時、-がかかり時）
 
 
+def _education_for_year(
+    params: LifePlanInput, i: int, inf: float,
+) -> tuple[float, list[LifeStageEvent]]:
+    """
+    シミュレーション i 年目の教育費（インフレ調整済み・万円）とイベントを返す。
+    FIRE閾値の残存教育費計算とメインループの両方から呼ばれる唯一の計算源。
+    """
+    education_expense = 0.0
+    events: list[LifeStageEvent] = []
+
+    for child_age_now in params.children_ages:
+        child_age = child_age_now + i
+
+        # 子供独立イベント（大学卒業の翌年 = 22歳）
+        if child_age == 22:
+            last_type = _resolve_edu_type(params.education_type, "university")
+            last_cost = EDU_ANNUAL_COST["university"][last_type] * (1 + inf) ** i
+            events.append(LifeStageEvent(
+                label="子供独立（教育費終了）",
+                category="education",
+                impact_man=int(last_cost),
+                severity="medium",
+            ))
+
+        stage = _edu_stage(child_age)
+        if stage is None:
+            continue
+
+        edu_type = _resolve_edu_type(params.education_type, stage)
+        annual_edu = EDU_ANNUAL_COST[stage][edu_type] * (1 + inf) ** i
+        education_expense += annual_edu
+
+        # 大学入学時の一時費用
+        if stage == "university" and child_age == 18:
+            entry = EDU_ENTRY_COST["university"][edu_type] * (1 + inf) ** i
+            education_expense += entry
+            events.append(LifeStageEvent(
+                label=f"大学入学（{edu_type}）",
+                category="education",
+                impact_man=-int(entry),
+                severity="high",
+            ))
+
+        # ステージ変化のイベント記録
+        prev_stage = _edu_stage(child_age - 1)
+        if prev_stage != stage:
+            labels = {
+                "nursery": "保育園入園",
+                "preschool": "幼稚園入園",
+                "elementary": "小学校入学",
+                "junior": "中学校入学",
+                "high": "高校入学",
+                "university": "大学入学",
+            }
+            events.append(LifeStageEvent(
+                label=labels.get(stage, stage),
+                category="education",
+                impact_man=-int(annual_edu),
+                severity="medium" if stage not in ("university", "high") else "high",
+            ))
+
+    return education_expense, events
+
+
 # ──────────────────────────────────────────────
 # メインシミュレーション
 # ──────────────────────────────────────────────
@@ -215,30 +295,57 @@ def simulate(params: LifePlanInput) -> dict:
         cash = float(params.total_assets) * 0.3
         invest = float(params.total_assets) * 0.7
 
+    n_years = params.life_expectancy - params.age + 1
+
+    # 残存教育費（FIRE閾値用）を先に計算しておく
+    # edu_costs[i] = i年目の教育費（名目・万円）
+    edu_costs = [_education_for_year(params, i, inf)[0] for i in range(n_years)]
+    edu_remaining = [0.0] * (n_years + 1)
+    for i in range(n_years - 1, -1, -1):
+        edu_remaining[i] = edu_remaining[i + 1] + edu_costs[i]
+
+    # 収入カーブは「現在年齢の係数」で正規化する
+    # （ユーザー入力＝現在の実年収なので、初年度の係数は必ず1.0になる）
+    base_peak = _income_peak_factor(params.age) or 1.0
+    spouse_base_peak = (
+        _income_peak_factor(params.spouse_age) or 1.0
+    ) if params.spouse_age is not None else 1.0
+
     fire_age = None
     snapshots: list[YearlySnapshot] = []
 
-    for i in range(params.life_expectancy - params.age + 1):
+    for i in range(n_years):
         age = params.age + i
         year = current_year + i
         events: list[LifeStageEvent] = []
 
         # ── 収入計算（名目） ──────────────────────
         if age < params.retirement_age:
-            # 年功序列カーブ × 名目賃金成長
+            # 年功序列カーブ（現在年齢で正規化）× 名目賃金成長
             base_income = params.annual_income * (1 + income_growth) ** i
-            peak_factor = _income_peak_factor(age)
+            peak_factor = _income_peak_factor(age) / base_peak
             income = base_income * peak_factor
         else:
             # 公的年金（部分インフレ連動、簡易モデル）
-            working_years = params.retirement_age - params.age
+            # 加入期間は22歳就労開始と仮定
+            working_years = max(params.retirement_age - CAREER_START_AGE, 0)
             income = _pension_estimate(params.annual_income, working_years)
             income *= (1 + inf * 0.5) ** (age - params.retirement_age)  # マクロ経済スライド
 
         spouse_income = 0.0
         if params.spouse_age is not None:
             spouse_current_age = params.spouse_age + i
-            if params.spouse_quit_age and spouse_current_age >= params.spouse_quit_age:
+            if spouse_current_age >= 65:
+                # 配偶者の公的年金（65歳から）
+                quit = params.spouse_quit_age
+                career_end = min(quit, params.spouse_retirement_age) if quit else params.spouse_retirement_age
+                s_working_years = max(career_end - CAREER_START_AGE, 0)
+                if params.spouse_income > 0 and s_working_years > 0:
+                    spouse_income = _pension_estimate(params.spouse_income, s_working_years)
+                else:
+                    spouse_income = 78  # 基礎年金のみ（万円/年）
+                spouse_income *= (1 + inf * 0.5) ** (spouse_current_age - 65)
+            elif params.spouse_quit_age and spouse_current_age >= params.spouse_quit_age:
                 spouse_income = 0
                 if spouse_current_age == params.spouse_quit_age:
                     events.append(LifeStageEvent(
@@ -250,7 +357,8 @@ def simulate(params: LifePlanInput) -> dict:
             elif spouse_current_age >= params.spouse_retirement_age:
                 spouse_income = 0
             else:
-                spouse_income = params.spouse_income * (1 + income_growth) ** i * _income_peak_factor(spouse_current_age)
+                spouse_peak = _income_peak_factor(spouse_current_age) / spouse_base_peak
+                spouse_income = params.spouse_income * (1 + income_growth) ** i * spouse_peak
 
         total_income = income + spouse_income
 
@@ -262,77 +370,25 @@ def simulate(params: LifePlanInput) -> dict:
         living_expense = living_base * (1 + inf) ** i
 
         # 教育費（インフレ調整 + ステージ別単価）
-        education_expense = 0.0
-        for child_age_now in params.children_ages:
-            child_age = child_age_now + i
-            stage = _edu_stage(child_age)
-            if stage is None:
-                continue
-
-            edu_type = params.education_type
-            if edu_type == "mixed":
-                # 小学校まで公立、中学以降私立
-                edu_type = "public" if stage in ("nursery", "preschool", "elementary") else "private"
-            elif edu_type == "private_high":
-                # 高校・大学のみ私立
-                edu_type = "private" if stage in ("high", "university") else "public"
-            elif edu_type == "private_middle":
-                # 中学以降私立（mixed と同じだが名前を明示）
-                edu_type = "public" if stage in ("nursery", "preschool", "elementary") else "private"
-
-            annual_edu = EDU_ANNUAL_COST[stage][edu_type] * (1 + inf) ** i
-            education_expense += annual_edu
-
-            # 大学入学時の一時費用
-            if stage == "university" and child_age == 18:
-                entry = EDU_ENTRY_COST["university"][edu_type] * (1 + inf) ** i
-                education_expense += entry
-                events.append(LifeStageEvent(
-                    label=f"大学入学（{edu_type}）",
-                    category="education",
-                    impact_man=-int(entry),
-                    severity="high",
-                ))
-
-            # ステージ変化のイベント記録
-            prev_stage = _edu_stage(child_age - 1)
-            if prev_stage != stage:
-                labels = {
-                    "nursery": "保育園入園",
-                    "preschool": "幼稚園入園",
-                    "elementary": "小学校入学",
-                    "junior": "中学校入学",
-                    "high": "高校入学",
-                    "university": "大学入学",
-                }
-                events.append(LifeStageEvent(
-                    label=labels.get(stage, stage),
-                    category="education",
-                    impact_man=-int(annual_edu),
-                    severity="medium" if stage not in ("university", "high") else "high",
-                ))
-
-            # 末子が独立（22歳）
-            if child_age == 22:
-                events.append(LifeStageEvent(
-                    label="子供独立（教育費終了）",
-                    category="education",
-                    impact_man=int(annual_edu),
-                    severity="medium",
-                ))
+        education_expense, edu_events = _education_for_year(params, i, inf)
+        events.extend(edu_events)
 
         total_expense = living_expense + education_expense
 
-        # 住宅購入（まず現金、不足分は投資資産から）
+        # 住宅購入（まず現金、不足分は投資資産から。保有資産を超える購入は不可）
         if params.buy_house and age == params.house_age:
-            remaining = params.house_price
-            deduct_cash = min(cash, remaining)
+            available = cash + invest
+            price = min(float(params.house_price), available)
+            deduct_cash = min(cash, price)
             cash -= deduct_cash
-            invest -= (remaining - deduct_cash)
+            invest -= (price - deduct_cash)
+            label = f"住宅購入（{params.house_price:,}万円）"
+            if price < params.house_price:
+                label += "※資産不足のため一部のみ"
             events.append(LifeStageEvent(
-                label=f"住宅購入（{params.house_price:,}万円）",
+                label=label,
                 category="housing",
-                impact_man=-params.house_price,
+                impact_man=-int(price),
                 severity="high",
             ))
 
@@ -369,9 +425,10 @@ def simulate(params: LifePlanInput) -> dict:
         household_grade = _grade(savings_rate, HOUSEHOLD_GRADES)
 
         # ② 資産形成力（ストック）を市場要因と行動要因に分解
-        #   市場要因 = 前期資産が運用利回りで増えた分（自分ではコントロール不可）
+        #   市場要因 = 運用リターン分（前期資産×利回り + 年内積立の運用益）
         #   行動要因 = 自分の行動（収支黒字＋積立）でもたらした増分
-        market_gain = int(cash_before * CASH_RATE + invest_before * r)  # 現金0.1% + 投資r%
+        #   ※ market_gain + behavior_gain = asset_change が成立する（丸め誤差除く）
+        market_gain = int(cash_before * CASH_RATE + invest_before * r + investment * r / 2)
         behavior_gain = int(net_cashflow + investment)
         asset_change = int(assets - assets_before)
         total_controllable = abs(market_gain) + abs(behavior_gain)
@@ -383,7 +440,9 @@ def simulate(params: LifePlanInput) -> dict:
         wealth_grade = _grade(asset_growth_rate, WEALTH_GRADES)
 
         # ③ 将来達成率
-        fire_threshold = total_expense * 25
+        # FIRE閾値 = 恒久支出（生活費）×25 + 残存教育費の総額
+        # 教育費は期間限定の支出なので4%ルールの対象にせず、残額を上乗せする
+        fire_threshold = living_expense * 25 + edu_remaining[i]
         fire_progress_pct = min(100.0, assets / fire_threshold * 100) if fire_threshold > 0 else 0.0
 
         # ── FIRE判定 ─────────────────────────────
@@ -437,9 +496,10 @@ def simulate(params: LifePlanInput) -> dict:
     retirement_snap = next((s for s in snapshots if s.age == params.retirement_age), snapshots[-1])
     retirement_assets = retirement_snap.assets
 
+    initial_assets = (params.cash_assets + params.investment_assets) or params.total_assets
     benchmark = _benchmark_growth(
-        params.total_assets, params.monthly_investment,
-        params.retirement_age - params.age, rate=0.06,
+        initial_assets, params.monthly_investment,
+        params.retirement_age - params.age, rate=0.06,  # 全世界株式インデックスの長期期待リターン想定
     )
     benchmark_at_retirement = benchmark[-1] if benchmark else 0
 
@@ -550,9 +610,12 @@ def _classify_phase(
 
 
 def _pension_estimate(annual_income: int, working_years: int) -> int:
-    """厚生年金の簡易推計（年額、万円）"""
+    """
+    厚生年金の簡易推計（年額、万円）。
+    working_years は加入期間（22歳就労開始と仮定した通算年数）。
+    報酬比例部分 = 平均標準報酬月額 × 0.5481% × 加入月数 の近似。
+    """
     monthly_salary = annual_income / 12
-    # 標準的な計算式の近似
     annual_pension = working_years * monthly_salary * 0.005481 * 12
     # 基礎年金（国民年金）加算: 約78万円/年
     annual_pension += 78

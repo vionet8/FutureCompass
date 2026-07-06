@@ -2,10 +2,14 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "future-compass-backend",
-      "runtimeExecutable": "uvicorn",
-      "runtimeArgs": ["backend.main:app", "--reload", "--port", "8000"],
-      "port": 8000
+      "name": "future-compass",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": [
+        "-NonInteractive",
+        "-Command",
+        "Set-Location C:/Apps/FutureCompass; backend/venv/Scripts/python.exe -m uvicorn backend.main:app --reload --port 8002"
+      ],
+      "port": 8002
     }
   ]
 }

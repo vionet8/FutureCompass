@@ -11,28 +11,7 @@ from collections import defaultdict
 from typing import Optional
 
 
-# マネーフォワードの大項目 → 内部カテゴリへのマッピング（表示用）
-MF_CATEGORY_MAP = {
-    "食費": "食費",
-    "日用品": "日用品",
-    "住宅": "住宅・家賃",
-    "水道・光熱費": "水道・光熱費",
-    "通信費": "通信費",
-    "交通費": "交通費",
-    "医療・健康": "医療・健康",
-    "衣服・美容": "衣服・美容",
-    "趣味・娯楽": "趣味・娯楽",
-    "教養・教育": "教養・教育",
-    "特別な支出": "特別な支出",
-    "税・社会保障": "税・社会保障",
-    "保険": "保険",
-    "現金・カード": "現金・カード",
-    "収入": "（収入）",
-    "未分類": "未分類",
-}
-
-# 分析から除外するカテゴリ（収入・振替）
-EXCLUDE_FROM_EXPENSE = {"（収入）", "（収入）"}
+# 収入として扱う大項目（それ以外のプラス金額は返金・還元として支出から相殺する）
 INCOME_CATEGORIES = {"収入"}
 
 
@@ -102,13 +81,16 @@ def parse_mf_csv(content: bytes) -> list[dict]:
 
 
 def _expense_transactions(transactions: list[dict]) -> list[dict]:
-    """支出として集計すべきトランザクションのみ返す"""
+    """
+    支出として集計すべきトランザクションを返す。
+    プラス金額（返金・キャッシュバック・ポイント還元）も含め、
+    カテゴリ内で純額計算する（支出の過大評価を防ぐ）。
+    """
     return [
         t for t in transactions
         if t["is_target"]
         and not t["is_transfer"]
         and t["category_major"] not in INCOME_CATEGORIES
-        and t["amount_yen"] < 0  # 支出は負
     ]
 
 
@@ -140,16 +122,18 @@ def monthly_summary(transactions: list[dict], year: int, month: int) -> dict:
     expenses = _expense_transactions(month_txns)
     incomes = _income_transactions(month_txns)
 
-    # カテゴリ → サブカテゴリ別集計
+    # カテゴリ → サブカテゴリ別に純額集計（支出は負→正に反転、返金は相殺）
     cat_sub: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for t in expenses:
         major = t["category_major"] or "未分類"
         minor = t["category_minor"] or "（その他）"
-        cat_sub[major][minor] += abs(t["amount_yen"])
+        cat_sub[major][minor] += -t["amount_yen"]  # 支出(-)を正に、返金(+)を負に
 
     categories = []
     for major, subs in sorted(cat_sub.items(), key=lambda x: -sum(x[1].values())):
         total = sum(subs.values())
+        if total == 0 and not any(subs.values()):
+            continue  # 完全相殺されたカテゴリは表示しない
         categories.append({
             "name": major,
             "amount_yen": total,
@@ -162,7 +146,7 @@ def monthly_summary(transactions: list[dict], year: int, month: int) -> dict:
     return {
         "year": year,
         "month": month,
-        "total_expense_yen": sum(abs(t["amount_yen"]) for t in expenses),
+        "total_expense_yen": sum(c["amount_yen"] for c in categories),
         "total_income_yen": sum(t["amount_yen"] for t in incomes),
         "categories": categories,
         "transaction_count": len(expenses),
@@ -186,18 +170,24 @@ def compare_yoy(
     for cat in all_cats:
         cur_amt = cur_map.get(cat, 0)
         prev_amt = prev_map.get(cat, 0)
+        is_new = prev_amt == 0 and cur_amt > 0
         if prev_amt == 0:
             change_pct = None
         else:
             change_pct = (cur_amt - prev_amt) / prev_amt
-        flagged = change_pct is not None and abs(change_pct) >= threshold
+        # 前年ゼロ→今年発生の新出カテゴリもフラグ対象（1,000円以上でノイズ除去）
+        flagged = (
+            (change_pct is not None and abs(change_pct) >= threshold)
+            or (is_new and cur_amt >= 1000)
+        )
         results.append({
             "category": cat,
             "current_yen": cur_amt,
             "prev_year_yen": prev_amt,
             "change_pct": round(change_pct * 100, 1) if change_pct is not None else None,
+            "is_new": is_new,
             "flagged": flagged,
-            "direction": "up" if (change_pct or 0) > 0 else "down",
+            "direction": "up" if (change_pct or 0) > 0 or is_new else "down",
         })
 
     # フラグあり → 増加 → 減少 の順でソート
@@ -213,16 +203,16 @@ def detect_trend(monthly_summaries: list[dict]) -> list[dict]:
     if len(monthly_summaries) < 3:
         return []
 
-    # カテゴリ × 月の行列
-    cat_series: dict[str, list[int]] = defaultdict(list)
+    # カテゴリ × 月の行列（全カテゴリを先に確定させてから月ごとに埋める。
+    # 途中から登場したカテゴリでも月の対応がズレない）
+    all_cats = {
+        c["name"] for summary in monthly_summaries for c in summary["categories"]
+    }
+    cat_series: dict[str, list[int]] = {cat: [] for cat in all_cats}
     for summary in monthly_summaries:
-        seen_cats = {c["name"] for c in summary["categories"]}
-        for cat_data in summary["categories"]:
-            cat_series[cat_data["name"]].append(cat_data["amount_yen"])
-        # 登場しない月は0で補完
-        for cat in list(cat_series.keys()):
-            if cat not in seen_cats:
-                cat_series[cat].append(0)
+        month_map = {c["name"]: c["amount_yen"] for c in summary["categories"]}
+        for cat in all_cats:
+            cat_series[cat].append(month_map.get(cat, 0))
 
     trends = []
     for cat, series in cat_series.items():

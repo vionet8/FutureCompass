@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import extract, func, text
-from datetime import date
 from typing import Optional
 
 from ..core.database import get_db
@@ -192,15 +191,19 @@ def get_spending_trend(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """直近N月のカテゴリ別支出トレンドと「じわじわ増加」検出"""
-    from datetime import date
+    """直近N月のカテゴリ別支出トレンドと「じわじわ増加」検出。
+    基準月は「データが存在する最新月」（実行日ではない）。"""
     transactions = _load_transactions(current_user.id, db)
 
-    today = date.today()
+    valid = [t for t in transactions if t["is_target"] and not t["is_transfer"]]
+    if not valid:
+        return {"monthly_summaries": [], "trends": []}
+
+    latest = max(t["date"] for t in valid)
     summaries = []
     for i in range(months - 1, -1, -1):
-        m = today.month - i
-        y = today.year
+        m = latest.month - i
+        y = latest.year
         while m <= 0:
             m += 12
             y -= 1
