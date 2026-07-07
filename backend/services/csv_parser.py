@@ -19,9 +19,29 @@ def _read_csv_any_encoding(content: bytes, **kwargs) -> pd.DataFrame:
     raise CSVParseError(f"CSVのエンコードを判別できませんでした: {last_error}")
 
 
+def _split_cash_investment(row) -> tuple[float, float, float]:
+    """
+    資産推移CSVの1行から (現金相当, 投資資産, 総資産) の円額を計算する。
+    現金相当 = 預金・現金 + ポイント（実質現金）
+    投資資産 = 株式(現物+信用) + 投資信託 + 年金（iDeCo等、長期運用資産として扱う）
+    """
+    def yen(col: str) -> float:
+        return float(row.get(col, 0) or 0)
+
+    cash = yen("預金・現金（円）")
+    stocks = yen("株式(現物)（円）") + yen("株式(信用)（円）")
+    funds = yen("投資信託（円）")
+    pension = yen("年金（円）")
+    points = yen("ポイント（円）")
+
+    investment = stocks + funds + pension
+    total = cash + investment + points
+    return cash + points, investment, total
+
+
 def parse_moneyforward(content: bytes) -> dict:
     """
-    マネーフォワードCSV（資産推移）。
+    マネーフォワードCSV（資産推移）。最新1行のみをプロフィール反映用に返す。
     実際の出力形式（Shift-JIS、日付降順）:
       日付, 合計（円）, 預金・現金（円）, 株式(現物)（円）, 株式(信用)（円）,
       投資信託（円）, 年金（円）, ポイント（円）
@@ -36,25 +56,40 @@ def parse_moneyforward(content: bytes) -> dict:
     df = df.sort_values("_日付dt", ascending=False)
     latest = df.iloc[0]
 
-    def yen(col: str) -> float:
-        return float(latest.get(col, 0) or 0)
-
-    cash = yen("預金・現金（円）")
-    stocks = yen("株式(現物)（円）") + yen("株式(信用)（円）")
-    funds = yen("投資信託（円）")
-    pension = yen("年金（円）")     # iDeCo等、長期運用資産として投資扱い
-    points = yen("ポイント（円）")  # 実質現金相当
-
-    investment = stocks + funds + pension
-    total = cash + investment + points
+    cash, investment, total = _split_cash_investment(latest)
 
     return {
         "total_assets_man": int(total / 10000),
-        "cash_assets_man": int((cash + points) / 10000),
+        "cash_assets_man": int(cash / 10000),
         "investment_assets_man": int(investment / 10000),
         "as_of_date": latest["日付"],
         "source": "moneyforward",
     }
+
+
+def parse_moneyforward_asset_history_full(content: bytes) -> list[dict]:
+    """
+    マネーフォワードCSV（資産推移）の全履歴を返す（実績投資成績トラッキング用）。
+    最新行のみのparse_moneyforwardと異なり、日付昇順で全行を返す。
+    """
+    df = _read_csv_any_encoding(content)
+    if "日付" not in df.columns:
+        raise CSVParseError("マネーフォワードの資産推移CSVではないようです（「日付」列が見つかりません）")
+
+    df = df.copy()
+    df["_日付dt"] = pd.to_datetime(df["日付"], format="%Y/%m/%d", errors="coerce")
+    df = df.dropna(subset=["_日付dt"]).sort_values("_日付dt")
+
+    rows = []
+    for _, row in df.iterrows():
+        cash, investment, total = _split_cash_investment(row)
+        rows.append({
+            "date": row["_日付dt"].date(),
+            "total_assets_yen": int(total),
+            "cash_assets_yen": int(cash),
+            "investment_assets_yen": int(investment),
+        })
+    return rows
 
 
 def parse_rakuten(content: bytes) -> dict:

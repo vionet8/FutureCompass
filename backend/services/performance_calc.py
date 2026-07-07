@@ -1,0 +1,101 @@
+"""
+Modified Dietz法による実績投資成績の計算。
+
+反復計算(XIRR)を避け、閉じた式で期間リターン・年率換算リターンを求める。
+"""
+
+from dataclasses import dataclass
+from datetime import date
+from typing import Optional
+
+from sqlalchemy.orm import Session
+
+from ..models.performance import AssetSnapshot, CashFlowEvent
+from .benchmark import get_price_on_or_before
+
+
+@dataclass
+class CashFlow:
+    flow_date: date
+    amount_yen: float  # 入金=正、出金=負
+
+
+def modified_dietz(
+    v0: float, v1: float, t0: date, t1: date, flows: list[CashFlow],
+) -> Optional[dict]:
+    """
+    Modified Dietz法で期間リターンと年率換算リターンを計算する。
+    計算不能な場合（期間ゼロ、分母がゼロ以下等）は例外を投げずNoneを返す。
+    """
+    d_total = (t1 - t0).days
+    if d_total <= 0:
+        return None
+
+    net_cf = sum(f.amount_yen for f in flows)
+    weighted_cf = 0.0
+    for f in flows:
+        # weight = 期間中その資金が「投資されていた」日数の割合。
+        # t0時点の入金は期間全体で運用されるのでweight≈1、t1直前の入金はweight≈0。
+        days_elapsed = (f.flow_date - t0).days
+        days_elapsed = max(0, min(d_total, days_elapsed))
+        weight = (d_total - days_elapsed) / d_total
+        weighted_cf += weight * f.amount_yen
+
+    denominator = v0 + weighted_cf
+    if denominator <= 0:
+        return None
+
+    r = (v1 - v0 - net_cf) / denominator
+    r_annualized = (1 + r) ** (365.0 / d_total) - 1
+    return {"period_return": r, "annualized_return": r_annualized, "days": d_total}
+
+
+def compute_user_performance(db: Session, user_id: str) -> Optional[dict]:
+    """AssetSnapshot + CashFlowEvent からユーザーの実績Modified Dietzを計算"""
+    snapshots = (
+        db.query(AssetSnapshot)
+        .filter(AssetSnapshot.user_id == user_id)
+        .order_by(AssetSnapshot.snapshot_date)
+        .all()
+    )
+    if len(snapshots) < 2:
+        return None
+
+    t0, v0 = snapshots[0].snapshot_date, snapshots[0].total_assets_yen
+    t1, v1 = snapshots[-1].snapshot_date, snapshots[-1].total_assets_yen
+
+    flows_db = (
+        db.query(CashFlowEvent)
+        .filter(
+            CashFlowEvent.user_id == user_id,
+            CashFlowEvent.flow_date > t0,
+            CashFlowEvent.flow_date <= t1,
+        )
+        .all()
+    )
+    flows = [CashFlow(f.flow_date, f.amount_yen) for f in flows_db]
+    return modified_dietz(v0, v1, t0, t1, flows)
+
+
+def compute_benchmark_performance(
+    db: Session, symbol: str, t0: date, v0: float, t1: date, flows: list[CashFlow],
+) -> Optional[dict]:
+    """
+    ユーザーと同じキャッシュフロー・同一期間で、ベンチマークの「架空運用」リターンを計算。
+    開始残高v0はt0時点の「架空入金」として扱う（ユーザー計算と対称にするため）。
+    """
+    price0 = get_price_on_or_before(db, symbol, t0)
+    price1 = get_price_on_or_before(db, symbol, t1)
+    if price0 is None or price1 is None:
+        return None
+
+    synthetic_flows = [CashFlow(t0, v0)] + list(flows)
+    units = 0.0
+    for f in synthetic_flows:
+        p = get_price_on_or_before(db, symbol, f.flow_date)
+        if p is None or p <= 0:
+            continue
+        units += f.amount_yen / p
+
+    bench_v1 = units * price1
+    return modified_dietz(0.0, bench_v1, t0, t1, synthetic_flows)

@@ -208,6 +208,7 @@
   <div class="nav-links" id="navLinks">
     <button onclick="showPage('dashboard')" data-page="dashboard">ダッシュボード</button>
     <button onclick="showPage('household')" data-page="household">家計分析</button>
+    <button onclick="showPage('performance')" data-page="performance">運用成績</button>
     <button onclick="showPage('budget')" data-page="budget">予算管理</button>
     <button onclick="showPage('profile')" data-page="profile">プロフィール</button>
     <button onclick="showPage('scenarios')" data-page="scenarios">シナリオ比較</button>
@@ -906,6 +907,63 @@
   </div>
 </div>
 
+<!-- PERFORMANCE PAGE -->
+<div class="page" id="page-performance">
+  <div class="section-title">📈 運用成績</div>
+  <p style="color:var(--text2);margin-bottom:20px;font-size:.9rem;">マネーフォワードの資産推移CSVをインポートすると、あなたの実績運用成績（入金分を除いた運用リターン）を実際のベンチマーク指数と比較できます。</p>
+
+  <!-- 資産推移CSVインポート -->
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;">
+    <div style="font-size:1rem;font-weight:600;margin-bottom:8px;">📂 資産推移CSVのインポート</div>
+    <div style="font-size:.82rem;color:var(--text2);margin-bottom:14px;line-height:1.7;">
+      マネーフォワード ME → 「資産」→「資産推移」→ CSVダウンロード<br>
+      毎回全履歴が出力されるので、そのまま何度でも再アップロードして問題ありません（重複は自動でスキップされます）。
+    </div>
+    <div class="upload-zone" onclick="document.getElementById('assetHistoryCsvInput').click()" style="max-width:420px;">
+      <input type="file" id="assetHistoryCsvInput" accept=".csv,.tsv,.txt" onchange="importAssetHistoryCsv(this)">
+      <div style="font-size:1.8rem;margin-bottom:6px;">📈</div>
+      <div>クリックしてCSVを選択</div>
+      <div style="color:var(--text2);font-size:.8rem;margin-top:4px;">資産推移CSV</div>
+    </div>
+    <div id="assetHistoryImportResult" style="margin-top:12px;"></div>
+  </div>
+
+  <!-- 実績サマリー -->
+  <div id="perfSummaryCard" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;"></div>
+
+  <!-- 入出金の手動記録 -->
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;">
+    <div style="font-size:1rem;font-weight:600;margin-bottom:8px;">💴 入出金の記録</div>
+    <div style="font-size:.82rem;color:var(--text2);margin-bottom:14px;line-height:1.7;">
+      追加投資・出金があった日を記録すると、運用リターンの計算精度が上がります（未記録でもおおよその値は計算されます）。
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:16px;">
+      <div class="form-group" style="margin:0;">
+        <label>日付</label>
+        <input type="date" id="cfDate" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:.88rem;">
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label>金額（円）</label>
+        <input type="number" id="cfAmount" placeholder="500000" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:.88rem;width:140px;">
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label>種別</label>
+        <select id="cfType" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:.88rem;">
+          <option value="deposit">入金</option>
+          <option value="withdrawal">出金</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin:0;flex:1;min-width:140px;">
+        <label>メモ（任意）</label>
+        <input type="text" id="cfMemo" placeholder="ボーナス投資など" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:.88rem;width:100%;">
+      </div>
+      <button class="btn-primary" style="padding:10px 20px;border-radius:8px;" onclick="addCashFlowEntry()">追加</button>
+    </div>
+    <div id="cfAlert"></div>
+    <div id="cfList"></div>
+  </div>
+</div>
+
 <!-- HISTORY PAGE -->
 <div class="page" id="page-history">
   <div class="section-title">シミュレーション履歴</div>
@@ -963,6 +1021,7 @@ function showPage(p) {
   if (p === 'dashboard' && token) loadLastSimulation();
   if (p === 'budget' && token) { initBudgetMonth(); loadBudget(); }
   if (p === 'household' && token) initHouseholdPage();
+  if (p === 'performance' && token) initPerformancePage();
 }
 
 function updateNav() {
@@ -2154,6 +2213,116 @@ function fmtYen(v) {
   const sign = v < 0 ? '-' : '';
   if (abs >= 10000) return sign + Math.round(abs / 1000) / 10 + '万円';
   return sign + abs.toLocaleString('ja-JP') + '円';
+}
+
+// ===== PERFORMANCE (運用成績) =====
+async function initPerformancePage() {
+  if (!token) return;
+  loadPerformanceSummary();
+  loadCashFlows();
+}
+
+async function importAssetHistoryCsv(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  const resultEl = document.getElementById('assetHistoryImportResult');
+  resultEl.innerHTML = '<div style="color:var(--text2);font-size:.85rem;">インポート中...</div>';
+  try {
+    const r = await api('POST', '/performance/import-asset-history', fd, true);
+    resultEl.innerHTML = `<div class="alert alert-success">
+      ✅ インポート完了：${r.imported}件を新規追加（${r.skipped}件は重複スキップ、ファイル内${r.total_in_file}件）
+    </div>`;
+    loadPerformanceSummary();
+  } catch (e) {
+    resultEl.innerHTML = `<div class="alert alert-error">❌ ${e.message}</div>`;
+  }
+  input.value = '';
+}
+
+async function loadPerformanceSummary() {
+  const card = document.getElementById('perfSummaryCard');
+  card.innerHTML = '<div style="color:var(--text2);font-size:.9rem;">読み込み中...</div>';
+  try {
+    const s = await api('GET', '/performance/summary');
+    if (!s.has_data) {
+      card.innerHTML = `<div style="color:var(--text2);font-size:.9rem;text-align:center;padding:12px 0;">${s.message}</div>`;
+      return;
+    }
+    const diffColor = s.diff_pct === null ? 'var(--text2)' : (s.diff_pct >= 0 ? 'var(--accent2)' : 'var(--warn)');
+    const diffText = s.diff_pct === null ? '' : `<span style="color:${diffColor};font-weight:700;">（${s.diff_pct >= 0 ? '+' : ''}${s.diff_pct}pt）</span>`;
+    let benchLine = '';
+    if (s.benchmark_error) {
+      benchLine = `<div style="font-size:.8rem;color:var(--warn);margin-top:10px;">⚠ ${s.benchmark_error}</div>`;
+    } else if (s.benchmark_annualized_return_pct !== null) {
+      benchLine = `<div style="font-size:.9rem;color:var(--text2);margin-top:10px;">vs オルカン実績(${s.benchmark_symbol}): <strong style="color:var(--text)">${s.benchmark_annualized_return_pct >= 0 ? '+' : ''}${s.benchmark_annualized_return_pct}%/年</strong> ${diffText}</div>`;
+    }
+    card.innerHTML = `
+      <div style="font-size:.85rem;color:var(--text2);margin-bottom:6px;">実績運用成績（年率換算・${s.period.start} 〜 ${s.period.end}）</div>
+      <div style="font-size:1.8rem;font-weight:700;color:${s.user_annualized_return_pct >= 0 ? 'var(--accent2)' : 'var(--warn)'}">
+        ${s.user_annualized_return_pct >= 0 ? '+' : ''}${s.user_annualized_return_pct}%/年
+      </div>
+      ${benchLine}
+    `;
+  } catch (e) {
+    card.innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+  }
+}
+
+async function addCashFlowEntry() {
+  const flow_date = document.getElementById('cfDate').value;
+  const amount_yen = parseInt(document.getElementById('cfAmount').value);
+  const flow_type = document.getElementById('cfType').value;
+  const memo = document.getElementById('cfMemo').value.trim();
+  if (!flow_date || !amount_yen) {
+    showAlert('cfAlert', '日付と金額は必須です');
+    return;
+  }
+  try {
+    await api('POST', '/performance/cash-flows', { flow_date, amount_yen, flow_type, memo: memo || null });
+    document.getElementById('cfAmount').value = '';
+    document.getElementById('cfMemo').value = '';
+    loadCashFlows();
+    loadPerformanceSummary();
+  } catch (e) {
+    showAlert('cfAlert', e.message);
+  }
+}
+
+async function loadCashFlows() {
+  const listEl = document.getElementById('cfList');
+  try {
+    const flows = await api('GET', '/performance/cash-flows');
+    if (!flows.length) {
+      listEl.innerHTML = '<div style="color:var(--text2);font-size:.82rem;">記録された入出金はまだありません。</div>';
+      return;
+    }
+    listEl.innerHTML = flows.map(f => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);gap:8px;">
+        <div style="font-size:.82rem;flex:1;">
+          ${f.date} ${f.flow_type === 'deposit' ? '📥 入金' : '📤 出金'}
+          ${f.memo ? `<span style="color:var(--text2);">（${f.memo}）</span>` : ''}
+        </div>
+        <div style="font-size:.85rem;font-weight:600;color:${f.flow_type === 'deposit' ? 'var(--accent2)' : 'var(--warn)'};">
+          ${f.amount_yen >= 0 ? '+' : ''}${fmtYen(f.amount_yen)}
+        </div>
+        <button class="btn-secondary" style="padding:4px 10px;border-radius:6px;font-size:.75rem;" onclick="deleteCashFlowEntry('${f.id}')">×</button>
+      </div>
+    `).join('');
+  } catch (e) {
+    listEl.innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+  }
+}
+
+async function deleteCashFlowEntry(id) {
+  try {
+    await api('DELETE', `/performance/cash-flows/${id}`);
+    loadCashFlows();
+    loadPerformanceSummary();
+  } catch (e) {
+    showAlert('cfAlert', e.message);
+  }
 }
 </script>
 </body>
