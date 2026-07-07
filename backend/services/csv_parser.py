@@ -92,6 +92,94 @@ def parse_moneyforward_asset_history_full(content: bytes) -> list[dict]:
     return rows
 
 
+# 楽天証券「入出金履歴」CSVの「内容」列 → 投資キャッシュフロー分類
+# INFLOW: 現金→投資資産への資金投入（Modified Dietzで正のキャッシュフロー）
+# OUTFLOW: 投資資産→現金への払出（負のキャッシュフロー）
+# EXCLUDE: 証券口座内の未投資現金の移動（銀行↔証券のマネーブリッジ等）。
+#          投資資産(株式・投信)の額を動かさないため対象外。
+RAKUTEN_CASHFLOW_CATEGORIES = {
+    "国内株式(自動入金)": "inflow",
+    "米国株式(自動入金)": "inflow",
+    "投信積立(自動入金)": "inflow",
+    "米国株式積立(自動入金)": "inflow",
+    "米国株式見直し代金(自動入金)": "inflow",
+    "投資信託(自動入金)": "inflow",
+    "IPO・PO(自動入金)": "inflow",
+    "配当金振込": "outflow",
+    "通常出金": "outflow",
+    "自動出金(スイープ)": "exclude",
+    "入金(楽天ポイント交換)": "exclude",
+    "らくらく入金(楽天銀行)": "exclude",
+    "リアルタイム入金": "exclude",
+}
+
+
+def _sniff_rakuten_cashflow(content: bytes) -> bool:
+    """楽天証券「入出金履歴」CSVのヘッダーを内容から判定する"""
+    head = content[:512]
+    for enc in ("shift_jis", "utf-8-sig", "utf-8"):
+        try:
+            text = head.decode(enc, errors="strict")
+        except UnicodeDecodeError:
+            continue
+        if "入出金日" in text and "入金額" in text and "出金額" in text:
+            return True
+    return False
+
+
+def parse_rakuten_cashflow(content: bytes) -> list[dict]:
+    """
+    楽天証券「入出金履歴」CSV（口座開設以来の入出金一覧）を解析する。
+    実際の出力形式（Shift-JIS、先頭3行はサマリー、4行目が空行、5行目がヘッダー）:
+      入出金日, 入金額[円], 出金額[円], 内容, 出金先
+
+    「内容」列は証券口座内の自動振替（スイープ等）を大量に含み、その多くは
+    投資資産(株式・投信)の額を動かさない現金同士の移動なので、
+    RAKUTEN_CASHFLOW_CATEGORIESで投資インフロー/アウトフロー/対象外に分類する。
+    未知のカテゴリはclassification="unclassified"として返し、呼び出し側で
+    見落としを検知できるようにする。全行を返す（exclude行も監査用に含む）。
+    """
+    try:
+        df = _read_csv_any_encoding(content, skiprows=4)
+    except CSVParseError:
+        raise
+    except Exception:
+        raise CSVParseError("楽天証券の入出金履歴CSVではないようです（想定する列が見つかりません）")
+
+    expected_cols = {"入出金日", "入金額[円]", "出金額[円]", "内容"}
+    if not expected_cols.issubset(set(df.columns)):
+        raise CSVParseError("楽天証券の入出金履歴CSVではないようです（想定する列が見つかりません）")
+
+    df = df.copy()
+    df["_日付dt"] = pd.to_datetime(df["入出金日"], format="%Y/%m/%d", errors="coerce")
+    df = df.dropna(subset=["_日付dt"]).sort_values("_日付dt")
+
+    rows = []
+    for _, row in df.iterrows():
+        content_label = str(row["内容"]).strip()
+        classification = RAKUTEN_CASHFLOW_CATEGORIES.get(content_label)  # None=未分類
+
+        in_yen = float(row["入金額[円]"]) if pd.notna(row["入金額[円]"]) else 0.0
+        out_yen = float(row["出金額[円]"]) if pd.notna(row["出金額[円]"]) else 0.0
+
+        if classification == "inflow":
+            amount = in_yen
+        elif classification == "outflow":
+            amount = -out_yen
+        else:
+            amount = None  # "exclude"（対象外）または未分類：投資キャッシュフローとしては扱わない
+
+        rows.append({
+            "date": row["_日付dt"].date(),
+            "content": content_label,
+            "in_yen": in_yen,
+            "out_yen": out_yen,
+            "classification": classification or "unclassified",
+            "amount_yen": amount,
+        })
+    return rows
+
+
 def parse_rakuten(content: bytes) -> dict:
     """
     楽天証券CSV（評価額一覧）。

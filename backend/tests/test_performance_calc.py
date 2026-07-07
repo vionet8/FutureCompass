@@ -1,9 +1,15 @@
 """
 Modified Dietz法の計算テスト（純粋関数、DB不要）
 """
+import pytest
 from datetime import date
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
-from backend.services.performance_calc import modified_dietz, CashFlow
+from backend.core.database import Base
+from backend.models.user import User
+from backend.models.performance import AssetSnapshot, CashFlowEvent
+from backend.services.performance_calc import modified_dietz, compute_user_performance, CashFlow
 
 
 class TestModifiedDietz:
@@ -115,3 +121,53 @@ class TestModifiedDietz:
             flows=[CashFlow(date(2024, 1, 1), 100_000)],  # t0より前
         )
         assert r is not None
+
+
+@pytest.fixture
+def db():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    TestSession = sessionmaker(bind=engine)
+    session = TestSession()
+    session.add(User(id="u1", email="t@example.com", hashed_password="x"))
+    session.commit()
+    yield session
+    session.close()
+
+
+class TestComputeUserPerformanceUsesInvestmentOnly:
+    def test_ignores_cash_only_growth(self, db):
+        """
+        総資産(現金+投資)は増えても投資資産(investment_assets_yen)が変わらなければ
+        リターンはゼロ付近になる（貯蓄と運用益を混同しないための回帰テスト）。
+        """
+        db.add(AssetSnapshot(
+            user_id="u1", snapshot_date=date(2025, 1, 1),
+            total_assets_yen=1_000_000, cash_assets_yen=500_000, investment_assets_yen=500_000,
+        ))
+        db.add(AssetSnapshot(
+            user_id="u1", snapshot_date=date(2026, 1, 1),
+            # 総資産は倍増しているが、これは全額現金の貯蓄によるもの
+            total_assets_yen=2_000_000, cash_assets_yen=1_500_000, investment_assets_yen=500_000,
+        ))
+        db.commit()
+
+        r = compute_user_performance(db, "u1")
+        assert r is not None
+        assert abs(r["period_return"]) < 0.01  # 投資資産は無変化なのでリターンはほぼ0
+
+    def test_reflects_investment_only_growth(self, db):
+        """投資資産自体が増えていればリターンに反映される"""
+        db.add(AssetSnapshot(
+            user_id="u1", snapshot_date=date(2025, 1, 1),
+            total_assets_yen=1_000_000, cash_assets_yen=500_000, investment_assets_yen=500_000,
+        ))
+        db.add(AssetSnapshot(
+            user_id="u1", snapshot_date=date(2026, 1, 1),
+            total_assets_yen=1_050_000, cash_assets_yen=500_000, investment_assets_yen=550_000,
+        ))
+        db.commit()
+
+        r = compute_user_performance(db, "u1")
+        assert r is not None
+        assert abs(r["period_return"] - 0.10) < 0.01

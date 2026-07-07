@@ -928,6 +928,22 @@
     <div id="assetHistoryImportResult" style="margin-top:12px;"></div>
   </div>
 
+  <!-- 楽天証券 入出金履歴CSVインポート -->
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;">
+    <div style="font-size:1rem;font-weight:600;margin-bottom:8px;">🏦 楽天証券 入出金履歴のインポート</div>
+    <div style="font-size:.82rem;color:var(--text2);margin-bottom:14px;line-height:1.7;">
+      楽天証券 → マイメニュー → 「入出金履歴」→ CSVダウンロード<br>
+      証券口座内の自動振替（スイープ等）は自動で除外し、投資への資金投入・払出のみを取り込みます。これにより運用リターンの精度が上がります。
+    </div>
+    <div class="upload-zone" onclick="document.getElementById('rakutenCsvInput').click()" style="max-width:420px;">
+      <input type="file" id="rakutenCsvInput" accept=".csv,.tsv,.txt" onchange="importRakutenCashflowCsv(this)">
+      <div style="font-size:1.8rem;margin-bottom:6px;">🏦</div>
+      <div>クリックしてCSVを選択</div>
+      <div style="color:var(--text2);font-size:.8rem;margin-top:4px;">入出金履歴CSV</div>
+    </div>
+    <div id="rakutenImportResult" style="margin-top:12px;"></div>
+  </div>
+
   <!-- 実績サマリー -->
   <div id="perfSummaryCard" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;"></div>
 
@@ -2235,6 +2251,28 @@ async function importAssetHistoryCsv(input) {
       ✅ インポート完了：${r.imported}件を新規追加（${r.skipped}件は重複スキップ、ファイル内${r.total_in_file}件）
     </div>`;
     loadPerformanceSummary();
+  } catch (e) {
+    resultEl.innerHTML = `<div class="alert alert-error">❌ ${e.message}</div>`;
+  }
+  input.value = '';
+}
+
+async function importRakutenCashflowCsv(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  const resultEl = document.getElementById('rakutenImportResult');
+  resultEl.innerHTML = '<div style="color:var(--text2);font-size:.85rem;">インポート中...</div>';
+  try {
+    const r = await api('POST', '/performance/import-rakuten-cashflow', fd, true);
+    let msg = `✅ インポート完了：${r.imported}件を新規追加（重複${r.skipped_duplicate}件・証券口座内振替のため対象外${r.excluded}件、ファイル内${r.total_in_file}件）`;
+    if (r.unclassified > 0) {
+      msg += `<br>⚠ ${r.unclassified}件は未分類のカテゴリのため取り込まれませんでした（開発側での分類追加が必要です）`;
+    }
+    resultEl.innerHTML = `<div class="alert alert-success">${msg}</div>`;
+    loadPerformanceSummary();
+    loadCashFlows();
   } catch (e) {
     resultEl.innerHTML = `<div class="alert alert-error">❌ ${e.message}</div>`;
   }

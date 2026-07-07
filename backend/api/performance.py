@@ -8,6 +8,7 @@ from ..core.database import get_db
 from ..models.user import User
 from ..models.performance import AssetSnapshot, CashFlowEvent
 from ..services.asset_history_import import import_asset_history
+from ..services.rakuten_cashflow_import import import_rakuten_cashflow
 from ..services.csv_parser import CSVParseError
 from ..services.cash_flow import add_cash_flow, list_cash_flows, delete_cash_flow
 from ..services.benchmark import ensure_cache_fresh, DEFAULT_SYMBOL
@@ -38,6 +39,21 @@ async def import_asset_history_csv(
     content = await file.read()
     try:
         result = import_asset_history(db, current_user.id, content)
+    except CSVParseError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return result
+
+
+@router.post("/import-rakuten-cashflow")
+async def import_rakuten_cashflow_csv(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """楽天証券の入出金履歴CSVをインポートし、投資キャッシュフローとして記録する"""
+    content = await file.read()
+    try:
+        result = import_rakuten_cashflow(db, current_user.id, content)
     except CSVParseError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return result
@@ -107,7 +123,7 @@ def get_performance_summary(
         .order_by(AssetSnapshot.snapshot_date)
         .all()
     )
-    t0, v0 = snapshots[0].snapshot_date, snapshots[0].total_assets_yen
+    t0, v0 = snapshots[0].snapshot_date, snapshots[0].investment_assets_yen
     t1 = snapshots[-1].snapshot_date
     flows_db = (
         db.query(CashFlowEvent)

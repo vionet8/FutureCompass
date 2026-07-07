@@ -51,7 +51,13 @@ def modified_dietz(
 
 
 def compute_user_performance(db: Session, user_id: str) -> Optional[dict]:
-    """AssetSnapshot + CashFlowEvent からユーザーの実績Modified Dietzを計算"""
+    """
+    AssetSnapshot + CashFlowEvent からユーザーの実績Modified Dietzを計算する。
+
+    総資産(現金+投資)ではなく投資資産(investment_assets_yen)のみを対象とする。
+    総資産ベースだと「貯蓄による増加」と「運用益」が混ざり、市場平均との比較が
+    意味を持たなくなるため（貯蓄率が高い人ほど見かけ上リターンが高くなってしまう）。
+    """
     snapshots = (
         db.query(AssetSnapshot)
         .filter(AssetSnapshot.user_id == user_id)
@@ -61,8 +67,8 @@ def compute_user_performance(db: Session, user_id: str) -> Optional[dict]:
     if len(snapshots) < 2:
         return None
 
-    t0, v0 = snapshots[0].snapshot_date, snapshots[0].total_assets_yen
-    t1, v1 = snapshots[-1].snapshot_date, snapshots[-1].total_assets_yen
+    t0, v0 = snapshots[0].snapshot_date, snapshots[0].investment_assets_yen
+    t1, v1 = snapshots[-1].snapshot_date, snapshots[-1].investment_assets_yen
 
     flows_db = (
         db.query(CashFlowEvent)
