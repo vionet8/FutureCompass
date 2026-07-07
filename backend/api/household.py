@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import extract, func, text
 from typing import Optional
+from pathlib import Path
+from pydantic import BaseModel
 
 from ..core.database import get_db
 from ..models.mf_transaction import MFTransaction
@@ -14,6 +16,12 @@ from ..services.mf_analyzer import (
     detect_trend,
     build_ai_analysis_payload,
 )
+from ..services.mf_import import (
+    import_file_content,
+    scan_directory_for_user,
+    default_watch_directory,
+)
+from ..models.auto_import import AutoImportConfig, ImportedFile
 from ..services.ai_report import generate_household_analysis
 from ..core.security import decrypt_value
 from .auth import get_current_user
@@ -45,47 +53,17 @@ async def import_mf_csv(
         raise HTTPException(status_code=400, detail="CSV/TSVファイルのみ対応しています")
 
     content = await file.read()
-    try:
-        transactions = parse_mf_csv(content)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+    result = import_file_content(db, current_user.id, file.filename, content, source="manual")
 
-    if not transactions:
+    if result["status"] == "not_mf_csv":
+        raise HTTPException(status_code=422, detail="マネーフォワードの入出金明細CSVではないようです")
+    if result["status"] == "no_transactions":
         raise HTTPException(status_code=422, detail="有効なトランザクションが見つかりませんでした")
+    if result["status"] == "already_imported":
+        raise HTTPException(status_code=409, detail="このファイルは既にインポート済みです")
 
-    # 重複チェック：同一mf_idがあればスキップ
-    existing_ids = set(
-        row[0] for row in db.query(MFTransaction.mf_id)
-        .filter(
-            MFTransaction.user_id == current_user.id,
-            MFTransaction.mf_id.isnot(None),
-        ).all()
-    )
-
-    new_count = 0
-    skip_count = 0
-    for t in transactions:
-        if t["mf_id"] and t["mf_id"] in existing_ids:
-            skip_count += 1
-            continue
-        db.add(MFTransaction(
-            user_id=current_user.id,
-            mf_id=t["mf_id"],
-            transaction_date=t["date"],
-            description=t["description"],
-            amount_yen=t["amount_yen"],
-            institution=t["institution"],
-            category_major=t["category_major"],
-            category_minor=t["category_minor"],
-            memo=t["memo"],
-            is_transfer=t["is_transfer"],
-            is_target=t["is_target"],
-        ))
-        new_count += 1
-
-    db.commit()
-
-    # インポートされた月の一覧
+    # インポートされた月の一覧（再パースせずDBから）
+    transactions = parse_mf_csv(content)
     months = sorted(set(
         (t["date"].year, t["date"].month)
         for t in transactions
@@ -93,8 +71,8 @@ async def import_mf_csv(
     ), reverse=True)
 
     return {
-        "imported": new_count,
-        "skipped": skip_count,
+        "imported": result["imported"],
+        "skipped": result["skipped"],
         "total_in_file": len(transactions),
         "available_months": [{"year": y, "month": m} for y, m in months[:24]],
     }
@@ -258,4 +236,94 @@ def get_ai_analysis(
         "trends": trends,
         "ai_report": report,
         "disclaimer": "本レポートは情報提供を目的としており、投資助言ではありません。",
+    }
+
+
+# ──────────────────────────────────────────────
+# 自動取込（フォルダ監視）
+# ──────────────────────────────────────────────
+
+class AutoImportInput(BaseModel):
+    enabled: bool = True
+    directory: str = ""
+
+
+def _config_response(config: Optional[AutoImportConfig], db: Session, user_id: str) -> dict:
+    recent_files = (
+        db.query(ImportedFile)
+        .filter(ImportedFile.user_id == user_id)
+        .order_by(ImportedFile.imported_at.desc())
+        .limit(10)
+        .all()
+    )
+    return {
+        "configured": config is not None,
+        "enabled": config.enabled if config else False,
+        "directory": config.directory if config else default_watch_directory(),
+        "last_scanned_at": config.last_scanned_at.isoformat() if config and config.last_scanned_at else None,
+        "recent_files": [
+            {
+                "file_name": f.file_name,
+                "imported": f.imported_count,
+                "skipped": f.skipped_count,
+                "source": f.source,
+                "imported_at": f.imported_at.isoformat() if f.imported_at else None,
+            }
+            for f in recent_files
+        ],
+    }
+
+
+@router.get("/auto-import")
+def get_auto_import_config(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """自動取込の設定と直近の取込履歴を返す"""
+    config = db.query(AutoImportConfig).filter(AutoImportConfig.user_id == current_user.id).first()
+    return _config_response(config, db, current_user.id)
+
+
+@router.put("/auto-import")
+def update_auto_import_config(
+    req: AutoImportInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """自動取込設定を保存する"""
+    directory = req.directory.strip() or default_watch_directory()
+    if req.enabled and not Path(directory).is_dir():
+        raise HTTPException(status_code=422, detail=f"フォルダが見つかりません: {directory}")
+
+    config = db.query(AutoImportConfig).filter(AutoImportConfig.user_id == current_user.id).first()
+    if config:
+        config.directory = directory
+        config.enabled = req.enabled
+    else:
+        config = AutoImportConfig(
+            user_id=current_user.id,
+            directory=directory,
+            enabled=req.enabled,
+        )
+        db.add(config)
+    db.commit()
+    return _config_response(config, db, current_user.id)
+
+
+@router.post("/auto-import/scan-now")
+def scan_now(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """監視フォルダを今すぐスキャンして取り込む"""
+    config = db.query(AutoImportConfig).filter(AutoImportConfig.user_id == current_user.id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="自動取込が未設定です。先に設定を保存してください")
+
+    results = scan_directory_for_user(db, config)
+    return {
+        "scanned_directory": config.directory,
+        "imported_files": results,
+        "total_new_transactions": sum(r["imported"] for r in results),
+        **_config_response(config, db, current_user.id),
     }

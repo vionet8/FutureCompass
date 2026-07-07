@@ -828,6 +828,32 @@
     <div id="mfImportResult" style="margin-top:12px;"></div>
   </div>
 
+  <!-- 自動取込設定 -->
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:8px;">
+      <div style="font-size:1rem;font-weight:600;">⚡ 自動取込（フォルダ監視）</div>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.85rem;color:var(--text2);">
+        <input type="checkbox" id="aiEnabled" style="width:18px;height:18px;accent-color:var(--accent);">
+        有効にする
+      </label>
+    </div>
+    <div style="font-size:.82rem;color:var(--text2);margin-bottom:14px;line-height:1.7;">
+      指定フォルダを監視して、マネーフォワードの明細CSVを見つけたら<strong style="color:var(--text)">自動でインポート</strong>します。<br>
+      マネフォからCSVをダウンロードするだけでOK。アップロード操作は不要になります（サーバー起動中のみ動作・60秒間隔）。
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
+      <div class="form-group" style="margin:0;flex:1;min-width:260px;">
+        <label>監視フォルダ</label>
+        <input type="text" id="aiDirectory" placeholder="C:\Users\...\Downloads"
+          style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:.88rem;width:100%;">
+      </div>
+      <button class="btn-primary" style="padding:10px 20px;border-radius:8px;" onclick="saveAutoImport()">設定を保存</button>
+      <button class="btn-secondary" style="padding:10px 20px;border-radius:8px;" onclick="scanNow()" id="aiScanBtn">🔍 今すぐスキャン</button>
+    </div>
+    <div id="aiStatus" style="margin-top:12px;font-size:.82rem;color:var(--text2);"></div>
+    <div id="aiRecentFiles" style="margin-top:8px;"></div>
+  </div>
+
   <!-- 月選択 + 分析ボタン -->
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:20px;display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;">
     <div class="form-group" style="margin:0;flex:1;min-width:160px;">
@@ -1876,8 +1902,76 @@ document.querySelector('[data-page="household"]')?.addEventListener('click', ini
 let hhCategoryChartInst = null;
 let hhCurrentSummary = null;
 
+async function loadAutoImport() {
+  try {
+    const cfg = await api('GET', '/household/auto-import');
+    document.getElementById('aiEnabled').checked = cfg.enabled;
+    document.getElementById('aiDirectory').value = cfg.directory || '';
+    renderAutoImportStatus(cfg);
+  } catch (e) { /* 未設定時はスルー */ }
+}
+
+function renderAutoImportStatus(cfg) {
+  const statusEl = document.getElementById('aiStatus');
+  const filesEl = document.getElementById('aiRecentFiles');
+  if (!cfg.configured) {
+    statusEl.textContent = '未設定です。フォルダを確認して「設定を保存」を押してください。';
+    filesEl.innerHTML = '';
+    return;
+  }
+  const last = cfg.last_scanned_at
+    ? new Date(cfg.last_scanned_at + 'Z').toLocaleString('ja-JP')
+    : 'まだスキャンされていません';
+  statusEl.innerHTML = `状態: <strong style="color:${cfg.enabled ? 'var(--accent2)' : 'var(--text2)'}">${cfg.enabled ? '✅ 有効' : '⏸ 停止中'}</strong>　最終スキャン: ${last}`;
+  if (cfg.recent_files && cfg.recent_files.length) {
+    filesEl.innerHTML = `<div style="font-size:.78rem;color:var(--text2);margin-bottom:4px;">直近の取込ファイル:</div>` +
+      cfg.recent_files.slice(0, 5).map(f => `
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:.78rem;padding:4px 0;border-bottom:1px solid var(--border);">
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${f.source === 'auto' ? '⚡' : '📂'} ${f.file_name}</span>
+          <span style="color:var(--text2);white-space:nowrap;">新規${f.imported}件 / 重複${f.skipped}件</span>
+        </div>`).join('');
+  } else {
+    filesEl.innerHTML = '';
+  }
+}
+
+async function saveAutoImport() {
+  try {
+    const cfg = await api('PUT', '/household/auto-import', {
+      enabled: document.getElementById('aiEnabled').checked,
+      directory: document.getElementById('aiDirectory').value.trim(),
+    });
+    renderAutoImportStatus(cfg);
+    showAlert('hhAlert', '自動取込設定を保存しました', 'success');
+  } catch (e) {
+    showAlert('hhAlert', e.message);
+  }
+}
+
+async function scanNow() {
+  const btn = document.getElementById('aiScanBtn');
+  btn.disabled = true;
+  btn.textContent = 'スキャン中...';
+  try {
+    const r = await api('POST', '/household/auto-import/scan-now');
+    renderAutoImportStatus(r);
+    if (r.total_new_transactions > 0) {
+      showAlert('hhAlert', `✅ ${r.imported_files.length}ファイルから${r.total_new_transactions}件を取り込みました`, 'success');
+      initHouseholdPage();  // 月セレクト・集計を更新
+    } else {
+      showAlert('hhAlert', '新しいファイルはありませんでした', 'success');
+    }
+  } catch (e) {
+    showAlert('hhAlert', e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔍 今すぐスキャン';
+  }
+}
+
 async function initHouseholdPage() {
   if (!token) return;
+  loadAutoImport();
   // 利用可能な月を取得してセレクトを構築
   try {
     const months = await api('GET', '/household/months');

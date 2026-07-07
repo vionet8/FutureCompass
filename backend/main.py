@@ -2,21 +2,44 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from contextlib import asynccontextmanager
 import os
+import threading
 
 from .core.config import get_settings
-from .core.database import Base, engine
-from .models import user, profile, budget as budget_model, mf_transaction  # noqa: テーブル作成のためimport
+from .core.database import Base, engine, SessionLocal
+from .models import user, profile, budget as budget_model, mf_transaction, auto_import  # noqa: テーブル作成のためimport
 from .api import auth, profile as profile_api, simulate, budget, household
+from .services.mf_import import scan_all_users
 
 settings = get_settings()
 
 Base.metadata.create_all(bind=engine)
 
+# ── 自動取込ワーカー（フォルダ監視、60秒間隔） ──────────
+AUTO_IMPORT_INTERVAL_SECONDS = 60
+_watcher_stop = threading.Event()
+
+
+def _auto_import_worker():
+    while not _watcher_stop.is_set():
+        scan_all_users(SessionLocal)
+        _watcher_stop.wait(AUTO_IMPORT_INTERVAL_SECONDS)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    watcher = threading.Thread(target=_auto_import_worker, daemon=True, name="mf-auto-import")
+    watcher.start()
+    yield
+    _watcher_stop.set()
+
+
 app = FastAPI(
     title="Future Compass API",
     description="ライフプランシミュレーター API",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
