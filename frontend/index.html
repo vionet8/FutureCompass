@@ -1066,13 +1066,15 @@ async function uploadCSV(input) {
   try {
     const r = await api('POST', '/simulate/upload-csv', fd, true);
     const p = r.parsed;
-    let msg = `📊 取込完了 (${p.source})<br>`;
-    if (p.total_assets_man) {
-      msg += `総資産: ${fmt(p.total_assets_man)}万円（投資欄に反映）`;
-      document.getElementById('pInvestAssets').value = p.total_assets_man;
+    let msg = `📊 取込完了 (${p.source})`;
+    if (p.as_of_date) msg += ` / ${p.as_of_date}時点`;
+    msg += '<br>';
+    if (p.cash_assets_man !== undefined) {
+      msg += `現金: ${fmt(p.cash_assets_man)}万円　`;
+      document.getElementById('pCashAssets').value = p.cash_assets_man;
     }
-    if (p.investment_assets_man) {
-      msg += `投資資産: ${fmt(p.investment_assets_man)}万円`;
+    if (p.investment_assets_man !== undefined) {
+      msg += `投資: ${fmt(p.investment_assets_man)}万円`;
       document.getElementById('pInvestAssets').value = p.investment_assets_man;
     }
     document.getElementById('csvResult').innerHTML = `<div class="alert alert-success">${msg}</div>`;
