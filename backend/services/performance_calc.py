@@ -11,7 +11,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from ..models.performance import AssetSnapshot, CashFlowEvent
-from .benchmark import get_price_on_or_before
+from .benchmark import get_price_on_or_before, get_price_jpy_on_or_before
 
 
 @dataclass
@@ -85,20 +85,26 @@ def compute_user_performance(db: Session, user_id: str) -> Optional[dict]:
 
 def compute_benchmark_performance(
     db: Session, symbol: str, t0: date, v0: float, t1: date, flows: list[CashFlow],
+    in_jpy: bool = True,
 ) -> Optional[dict]:
     """
     ユーザーと同じキャッシュフロー・同一期間で、ベンチマークの「架空運用」リターンを計算。
     開始残高v0はt0時点の「架空入金」として扱う（ユーザー計算と対称にするため）。
+
+    in_jpy=True（デフォルト）: ドル建て価格をドル円レートで円換算して計算する。
+      キャッシュフローは円建てなので、ユーザーの円建て実績と比較するには
+      「日本円でVTを買った場合」のリターン（=価格変動×為替変動）でなければ対称にならない。
+    in_jpy=False: ドル建て価格のまま計算（為替の影響を除いたVT自体の成績）。
     """
-    price0 = get_price_on_or_before(db, symbol, t0)
-    price1 = get_price_on_or_before(db, symbol, t1)
-    if price0 is None or price1 is None:
+    price_fn = get_price_jpy_on_or_before if in_jpy else get_price_on_or_before
+    price1 = price_fn(db, symbol, t1)
+    if price_fn(db, symbol, t0) is None or price1 is None:
         return None
 
     synthetic_flows = [CashFlow(t0, v0)] + list(flows)
     units = 0.0
     for f in synthetic_flows:
-        p = get_price_on_or_before(db, symbol, f.flow_date)
+        p = price_fn(db, symbol, f.flow_date)
         if p is None or p <= 0:
             continue
         units += f.amount_yen / p

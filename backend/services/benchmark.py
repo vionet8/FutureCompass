@@ -22,6 +22,7 @@ logger = logging.getLogger("benchmark")
 
 YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=10y&interval=1d"
 DEFAULT_SYMBOL = "VT"  # Vanguard Total World Stock ETF（オルカン相当の全世界株プロキシ）
+FX_SYMBOL = "USDJPY=X"  # ドル円レート（VTを円建てに換算するため）
 
 
 def _fetch_stooq_csv(symbol: str) -> list[dict]:
@@ -82,6 +83,19 @@ def get_price_on_or_before(db: Session, symbol: str, target_date: date) -> Optio
         .first()
     )
     return row.close_price if row else None
+
+
+def get_price_jpy_on_or_before(db: Session, symbol: str, target_date: date) -> Optional[float]:
+    """
+    ドル建てベンチマークの終値を円換算で返す（VTドル価格 × ドル円レート）。
+    「日本円でVTに投資した場合」のリターンを計算するために使う。
+    どちらか一方でもデータがなければNone。
+    """
+    usd_price = get_price_on_or_before(db, symbol, target_date)
+    fx_rate = get_price_on_or_before(db, FX_SYMBOL, target_date)
+    if usd_price is None or fx_rate is None:
+        return None
+    return usd_price * fx_rate
 
 
 def ensure_cache_fresh(db: Session, symbol: str = DEFAULT_SYMBOL, max_age_hours: int = 24) -> Optional[str]:

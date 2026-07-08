@@ -2294,7 +2294,10 @@ async function loadPerformanceSummary() {
     if (s.benchmark_error) {
       benchLine = `<div style="font-size:.8rem;color:var(--warn);margin-top:10px;">⚠ ${s.benchmark_error}</div>`;
     } else if (s.benchmark_annualized_return_pct !== null) {
-      benchLine = `<div style="font-size:.9rem;color:var(--text2);margin-top:10px;">vs オルカン実績(${s.benchmark_symbol}): <strong style="color:var(--text)">${s.benchmark_annualized_return_pct >= 0 ? '+' : ''}${s.benchmark_annualized_return_pct}%/年</strong> ${diffText}</div>`;
+      benchLine = `<div style="font-size:.9rem;color:var(--text2);margin-top:10px;">vs 円でVT(全世界株)を買った場合: <strong style="color:var(--text)">${s.benchmark_annualized_return_pct >= 0 ? '+' : ''}${s.benchmark_annualized_return_pct}%/年</strong> ${diffText}</div>`;
+      if (s.benchmark_usd_annualized_return_pct !== null && s.benchmark_usd_annualized_return_pct !== undefined) {
+        benchLine += `<div style="font-size:.78rem;color:var(--text2);margin-top:4px;">参考: VTドル建て ${s.benchmark_usd_annualized_return_pct >= 0 ? '+' : ''}${s.benchmark_usd_annualized_return_pct}%/年（円建てとの差 ≈ 円安の押し上げ分）</div>`;
+      }
     }
     card.innerHTML = `
       <div style="font-size:.85rem;color:var(--text2);margin-bottom:6px;">実績運用成績（年率換算・${s.period.start} 〜 ${s.period.end}）</div>

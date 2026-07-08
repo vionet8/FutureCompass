@@ -38,6 +38,32 @@ class TestGetPriceOnOrBefore:
         assert bm.get_price_on_or_before(db, "vt.us", date(2026, 7, 3)) is None
 
 
+class TestGetPriceJpyOnOrBefore:
+    def test_multiplies_usd_price_by_fx_rate(self, db):
+        db.add(bm.BenchmarkPrice(symbol="VT", price_date=date(2026, 7, 3), close_price=100.0))
+        db.add(bm.BenchmarkPrice(symbol=bm.FX_SYMBOL, price_date=date(2026, 7, 3), close_price=150.0))
+        db.commit()
+        assert bm.get_price_jpy_on_or_before(db, "VT", date(2026, 7, 3)) == 15000.0
+
+    def test_missing_fx_returns_none(self, db):
+        """ドル円レートが未取得なら円換算不能としてNoneを返す（誤った数値を返さない）"""
+        db.add(bm.BenchmarkPrice(symbol="VT", price_date=date(2026, 7, 3), close_price=100.0))
+        db.commit()
+        assert bm.get_price_jpy_on_or_before(db, "VT", date(2026, 7, 3)) is None
+
+    def test_missing_price_returns_none(self, db):
+        db.add(bm.BenchmarkPrice(symbol=bm.FX_SYMBOL, price_date=date(2026, 7, 3), close_price=150.0))
+        db.commit()
+        assert bm.get_price_jpy_on_or_before(db, "VT", date(2026, 7, 3)) is None
+
+    def test_fx_falls_back_to_prior_day(self, db):
+        """為替は週末にデータがないため、直近営業日のレートで換算する"""
+        db.add(bm.BenchmarkPrice(symbol="VT", price_date=date(2026, 7, 5), close_price=100.0))
+        db.add(bm.BenchmarkPrice(symbol=bm.FX_SYMBOL, price_date=date(2026, 7, 3), close_price=150.0))
+        db.commit()
+        assert bm.get_price_jpy_on_or_before(db, "VT", date(2026, 7, 5)) == 15000.0
+
+
 class TestRefreshBenchmarkCache:
     def test_dedups_by_symbol_and_date(self, db, monkeypatch):
         rows = [

@@ -11,7 +11,7 @@ from ..services.asset_history_import import import_asset_history
 from ..services.rakuten_cashflow_import import import_rakuten_cashflow
 from ..services.csv_parser import CSVParseError
 from ..services.cash_flow import add_cash_flow, list_cash_flows, delete_cash_flow
-from ..services.benchmark import ensure_cache_fresh, DEFAULT_SYMBOL
+from ..services.benchmark import ensure_cache_fresh, DEFAULT_SYMBOL, FX_SYMBOL
 from ..services.performance_calc import (
     compute_user_performance,
     compute_benchmark_performance,
@@ -115,7 +115,10 @@ def get_performance_summary(
             "message": "資産推移データが不足しています（最低2時点分の資産スナップショットが必要です）",
         }
 
+    # VT価格とドル円レートの両方が必要（円建てVTリターン = ドル価格変動 × 為替変動）
     benchmark_error = ensure_cache_fresh(db, DEFAULT_SYMBOL)
+    if benchmark_error is None:
+        benchmark_error = ensure_cache_fresh(db, FX_SYMBOL)
 
     snapshots = (
         db.query(AssetSnapshot)
@@ -136,13 +139,17 @@ def get_performance_summary(
     )
     flows = [CashFlow(f.flow_date, f.amount_yen) for f in flows_db]
 
-    bench_perf = None
+    bench_perf_jpy = None
+    bench_perf_usd = None
     if benchmark_error is None:
-        bench_perf = compute_benchmark_performance(db, DEFAULT_SYMBOL, t0, v0, t1, flows)
+        # 円建て（日本円でVTを買った場合。ユーザーの円建て実績と対称な比較）
+        bench_perf_jpy = compute_benchmark_performance(db, DEFAULT_SYMBOL, t0, v0, t1, flows, in_jpy=True)
+        # ドル建て（為替の影響を除いたVT自体の成績。参考値）
+        bench_perf_usd = compute_benchmark_performance(db, DEFAULT_SYMBOL, t0, v0, t1, flows, in_jpy=False)
 
     diff_pct = None
-    if bench_perf is not None:
-        diff_pct = round((user_perf["annualized_return"] - bench_perf["annualized_return"]) * 100, 2)
+    if bench_perf_jpy is not None:
+        diff_pct = round((user_perf["annualized_return"] - bench_perf_jpy["annualized_return"]) * 100, 2)
 
     return {
         "has_data": True,
@@ -150,7 +157,10 @@ def get_performance_summary(
         "user_annualized_return_pct": round(user_perf["annualized_return"] * 100, 2),
         "benchmark_symbol": DEFAULT_SYMBOL,
         "benchmark_annualized_return_pct": (
-            round(bench_perf["annualized_return"] * 100, 2) if bench_perf else None
+            round(bench_perf_jpy["annualized_return"] * 100, 2) if bench_perf_jpy else None
+        ),
+        "benchmark_usd_annualized_return_pct": (
+            round(bench_perf_usd["annualized_return"] * 100, 2) if bench_perf_usd else None
         ),
         "diff_pct": diff_pct,
         "benchmark_error": benchmark_error,
