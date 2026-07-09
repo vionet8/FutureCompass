@@ -947,6 +947,9 @@
   <!-- 実績サマリー -->
   <div id="perfSummaryCard" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;"></div>
 
+  <!-- FIRE到達予測 -->
+  <div id="fireProjectionCard" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;"></div>
+
   <!-- 入出金の手動記録 -->
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;">
     <div style="font-size:1rem;font-weight:600;margin-bottom:8px;">💴 入出金の記録</div>
@@ -2235,7 +2238,50 @@ function fmtYen(v) {
 async function initPerformancePage() {
   if (!token) return;
   loadPerformanceSummary();
+  loadFireProjection();
   loadCashFlows();
+}
+
+async function loadFireProjection() {
+  const card = document.getElementById('fireProjectionCard');
+  card.innerHTML = '<div style="color:var(--text2);font-size:.9rem;">読み込み中...</div>';
+  try {
+    const p = await api('GET', '/performance/fire-projection');
+    if (!p.has_data) {
+      card.innerHTML = `<div style="font-size:1rem;font-weight:600;margin-bottom:8px;">🔥 FIRE到達予測</div>
+        <div style="color:var(--text2);font-size:.9rem;">${p.message}</div>`;
+      return;
+    }
+    const rows = p.scenarios.map(s => {
+      const years = s.years_to_fire === null
+        ? '<span style="color:var(--warn);">100年以内に未到達</span>'
+        : (s.years_to_fire === 0 ? '<strong style="color:var(--accent2);">達成済み🎉</strong>'
+           : `<strong>${s.years_to_fire}年</strong>${s.fire_age !== null ? `（${s.fire_age}歳）` : ''}`);
+      return `<tr>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border);">${s.label}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border);text-align:right;">${s.annual_return_pct >= 0 ? '+' : ''}${s.annual_return_pct}%/年</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border);text-align:right;">${years}</td>
+      </tr>`;
+    }).join('');
+    card.innerHTML = `
+      <div style="font-size:1rem;font-weight:600;margin-bottom:8px;">🔥 FIRE到達予測</div>
+      <div style="font-size:.82rem;color:var(--text2);margin-bottom:14px;line-height:1.7;">
+        目標額：<strong style="color:var(--text)">${p.fire_target_man.toLocaleString()}万円</strong>（年間支出×25倍、4%ルール）
+        ／ 現在の投資資産：${p.current_investment_man.toLocaleString()}万円 ／ 毎月積立：${p.monthly_investment_man}万円
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:.9rem;">
+        <thead><tr style="color:var(--text2);font-size:.8rem;">
+          <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);">シナリオ</th>
+          <th style="padding:8px 12px;text-align:right;border-bottom:1px solid var(--border);">年率</th>
+          <th style="padding:8px 12px;text-align:right;border-bottom:1px solid var(--border);">FIRE到達まで</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="font-size:.75rem;color:var(--text2);margin-top:10px;">※ 実績リターン（現在+${p.actual_annualized_return_pct}%/年）には円安の追い風が含まれます。保守的な計画には-5pt/-10ptシナリオを参考にしてください。</div>
+    `;
+  } catch (e) {
+    card.innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+  }
 }
 
 async function importAssetHistoryCsv(input) {

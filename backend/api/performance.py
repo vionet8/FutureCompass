@@ -5,8 +5,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..core.database import get_db
+from ..core.security import decrypt_value
 from ..models.user import User
+from ..models.profile import UserProfile
 from ..models.performance import AssetSnapshot, CashFlowEvent
+from ..services.fire_projection import build_fire_scenarios
 from ..services.asset_history_import import import_asset_history
 from ..services.rakuten_cashflow_import import import_rakuten_cashflow
 from ..services.csv_parser import CSVParseError
@@ -164,4 +167,68 @@ def get_performance_summary(
         ),
         "diff_pct": diff_pct,
         "benchmark_error": benchmark_error,
+    }
+
+
+@router.get("/fire-projection")
+def get_fire_projection(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    実績リターンが続いた場合のFIRE到達年数（4%ルール: 年間支出×25倍）。
+    実績そのまま／-5pt／-10pt の3シナリオを返す。
+    """
+    user_perf = compute_user_performance(db, current_user.id)
+    if user_perf is None:
+        return {
+            "has_data": False,
+            "message": "実績リターンの計算に資産推移データが必要です（運用成績を先に取り込んでください）",
+        }
+
+    profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+    annual_expense_man = (
+        int(decrypt_value(profile.annual_expense_encrypted))
+        if profile and profile.annual_expense_encrypted else 0
+    )
+    monthly_investment_man = (
+        int(decrypt_value(profile.monthly_investment_encrypted))
+        if profile and profile.monthly_investment_encrypted else 0
+    )
+    if annual_expense_man <= 0:
+        return {
+            "has_data": False,
+            "message": "FIRE目標額の計算に年間支出が必要です（プロフィールで年間支出を設定してください）",
+        }
+
+    latest = (
+        db.query(AssetSnapshot)
+        .filter(AssetSnapshot.user_id == current_user.id)
+        .order_by(AssetSnapshot.snapshot_date.desc())
+        .first()
+    )
+    current_investment_yen = latest.investment_assets_yen
+
+    scenarios = build_fire_scenarios(
+        current_investment_yen=current_investment_yen,
+        monthly_investment_yen=monthly_investment_man * 10000,
+        annual_expense_yen=annual_expense_man * 10000,
+        actual_annual_return=user_perf["annualized_return"],
+        current_age=profile.age if profile else None,
+    )
+    return {
+        "has_data": True,
+        "fire_target_man": annual_expense_man * 25,
+        "current_investment_man": int(current_investment_yen / 10000),
+        "monthly_investment_man": monthly_investment_man,
+        "actual_annualized_return_pct": round(user_perf["annualized_return"] * 100, 2),
+        "scenarios": [
+            {
+                "label": s.label,
+                "annual_return_pct": round(s.annual_return * 100, 2),
+                "years_to_fire": s.years_to_fire,
+                "fire_age": s.fire_age,
+            }
+            for s in scenarios
+        ],
     }
