@@ -16,6 +16,9 @@ from sqlalchemy.orm import Session
 from ..models.mf_transaction import MFTransaction
 from ..models.auto_import import AutoImportConfig, ImportedFile
 from .mf_analyzer import parse_mf_csv
+from .csv_parser import _sniff_moneyforward_assets, _sniff_rakuten_cashflow, CSVParseError
+from .asset_history_import import import_asset_history
+from .rakuten_cashflow_import import import_rakuten_cashflow
 
 logger = logging.getLogger("mf_import")
 
@@ -87,9 +90,11 @@ def import_file_content(
     db: Session, user_id: str, file_name: str, content: bytes, source: str = "manual",
 ) -> dict:
     """
-    CSVバイト列を取り込む。ファイルハッシュで既取込チェック。
-    戻り値: {status, imported, skipped, file_name}
+    CSVバイト列を内容スニッフィングで種別判定して取り込む。ファイルハッシュで既取込チェック。
+    対応: 家計明細（MF入出金明細）／資産推移（MF）／楽天証券入出金履歴
+    戻り値: {status, imported, skipped, file_name, file_type}
       status: "imported" | "already_imported" | "not_mf_csv" | "no_transactions"
+      file_type: "household" | "asset_history" | "rakuten_cashflow" | None
     """
     fhash = file_sha256(content)
     already = (
@@ -98,32 +103,62 @@ def import_file_content(
         .first()
     )
     if already:
-        return {"status": "already_imported", "imported": 0, "skipped": 0, "file_name": file_name}
+        return {"status": "already_imported", "imported": 0, "skipped": 0,
+                "file_name": file_name, "file_type": None}
 
-    if not sniff_mf_csv(content):
-        return {"status": "not_mf_csv", "imported": 0, "skipped": 0, "file_name": file_name}
+    if sniff_mf_csv(content):
+        result = _import_household(db, user_id, content)
+        file_type = "household"
+    elif _sniff_moneyforward_assets(content):
+        result = _import_typed(import_asset_history, db, user_id, content)
+        file_type = "asset_history"
+    elif _sniff_rakuten_cashflow(content):
+        result = _import_typed(import_rakuten_cashflow, db, user_id, content)
+        file_type = "rakuten_cashflow"
+    else:
+        return {"status": "not_mf_csv", "imported": 0, "skipped": 0,
+                "file_name": file_name, "file_type": None}
 
-    try:
-        transactions = parse_mf_csv(content)
-    except ValueError:
-        return {"status": "not_mf_csv", "imported": 0, "skipped": 0, "file_name": file_name}
-
-    if not transactions:
-        return {"status": "no_transactions", "imported": 0, "skipped": 0, "file_name": file_name}
-
-    new_count, skip_count = save_transactions(db, user_id, transactions)
+    if result["status"] != "imported":
+        return {**result, "file_name": file_name, "file_type": file_type}
 
     db.add(ImportedFile(
         user_id=user_id,
         file_name=file_name,
         file_hash=fhash,
-        imported_count=new_count,
-        skipped_count=skip_count,
+        imported_count=result["imported"],
+        skipped_count=result["skipped"],
         source=source,
     ))
     db.commit()
 
-    return {"status": "imported", "imported": new_count, "skipped": skip_count, "file_name": file_name}
+    return {"status": "imported", "imported": result["imported"], "skipped": result["skipped"],
+            "file_name": file_name, "file_type": file_type}
+
+
+def _import_household(db: Session, user_id: str, content: bytes) -> dict:
+    """家計明細CSV（MF入出金明細）の取込。import_file_content内部用"""
+    try:
+        transactions = parse_mf_csv(content)
+    except ValueError:
+        return {"status": "not_mf_csv", "imported": 0, "skipped": 0}
+    if not transactions:
+        return {"status": "no_transactions", "imported": 0, "skipped": 0}
+    new_count, skip_count = save_transactions(db, user_id, transactions)
+    return {"status": "imported", "imported": new_count, "skipped": skip_count}
+
+
+def _import_typed(importer, db: Session, user_id: str, content: bytes) -> dict:
+    """
+    資産推移／楽天入出金の取込をimport_file_contentの戻り値形式に揃える。
+    各インポーターは冪等（日付・内容ベースのdedup）なので再実行しても安全。
+    """
+    try:
+        r = importer(db, user_id, content)
+    except CSVParseError:
+        return {"status": "not_mf_csv", "imported": 0, "skipped": 0}
+    skipped = r.get("skipped", r.get("skipped_duplicate", 0))
+    return {"status": "imported", "imported": r["imported"], "skipped": skipped}
 
 
 def scan_directory_for_user(db: Session, config: AutoImportConfig) -> list[dict]:
@@ -155,8 +190,8 @@ def scan_directory_for_user(db: Session, config: AutoImportConfig) -> list[dict]
         result = import_file_content(db, config.user_id, path.name, content, source="auto")
         if result["status"] == "imported":
             logger.info(
-                "自動取込: %s → 新規%d件・重複%d件",
-                path.name, result["imported"], result["skipped"],
+                "自動取込: %s (%s) → 新規%d件・重複%d件",
+                path.name, result.get("file_type"), result["imported"], result["skipped"],
             )
             results.append(result)
         # not_mf_csv / already_imported は毎回スニッフされるが軽量なので記録しない

@@ -118,10 +118,9 @@ def _sniff_rakuten_cashflow(content: bytes) -> bool:
     """楽天証券「入出金履歴」CSVのヘッダーを内容から判定する"""
     head = content[:512]
     for enc in ("shift_jis", "utf-8-sig", "utf-8"):
-        try:
-            text = head.decode(enc, errors="strict")
-        except UnicodeDecodeError:
-            continue
+        # errors="ignore": 先頭Nバイトで切るとマルチバイト文字の途中で切れて
+        # strictでは正当なファイルまでデコード失敗するため（末尾1文字欠けは判定に影響しない）
+        text = head.decode(enc, errors="ignore")
         if "入出金日" in text and "入金額" in text and "出金額" in text:
             return True
     return False
@@ -230,10 +229,11 @@ def _sniff_moneyforward_assets(content: bytes) -> bool:
     """マネーフォワード資産推移CSVのヘッダーを内容から判定する（ファイル名は当てにならないため）"""
     head = content[:1024]
     for enc in ("shift_jis", "utf-8-sig", "utf-8"):
-        try:
-            first_line = head.decode(enc, errors="strict").splitlines()[0]
-        except (UnicodeDecodeError, IndexError):
+        # errors="ignore": 先頭Nバイトで切るとマルチバイト文字の途中で切れるため（_sniff_rakuten_cashflow参照）
+        lines = head.decode(enc, errors="ignore").splitlines()
+        if not lines:
             continue
+        first_line = lines[0]
         if "日付" in first_line and "合計" in first_line and "預金" in first_line:
             return True
     return False

@@ -78,6 +78,18 @@ class TestParseRakutenCashflow:
         with pytest.raises(CSVParseError):
             parse_rakuten_cashflow(b"name,age\nAlice,30\n")
 
+    def test_sniff_survives_multibyte_cut_at_512_bytes(self):
+        """
+        スニッフィングは先頭512バイトで切るため、Shift-JISのマルチバイト文字の
+        途中で切れることがある。strictデコードだと正当なファイルまで判定失敗する
+        （実際の楽天CSVで発生）ことへの回帰テスト。
+        """
+        from backend.services.csv_parser import _sniff_rakuten_cashflow
+        # 全角文字を大量に含む行で512バイト境界がマルチバイト途中になりやすくする
+        rows = ['"2026/06/12","113315","","IPO・PO(自動入金)","楽天銀行"'] * 20
+        content = rakuten_csv(rows)
+        assert _sniff_rakuten_cashflow(content)
+
     def test_sorted_by_date_ascending(self):
         content = rakuten_csv([
             '"2026/06/12","113315","","IPO・PO(自動入金)","楽天銀行"',
