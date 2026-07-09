@@ -18,6 +18,7 @@ from ..services.benchmark import ensure_cache_fresh, DEFAULT_SYMBOL, FX_SYMBOL
 from ..services.performance_calc import (
     compute_user_performance,
     compute_benchmark_performance,
+    compute_history_series,
     CashFlow,
 )
 from .auth import get_current_user
@@ -167,6 +168,42 @@ def get_performance_summary(
         ),
         "diff_pct": diff_pct,
         "benchmark_error": benchmark_error,
+    }
+
+
+@router.get("/history")
+def get_performance_history(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    資産推移グラフ用の時系列（実際の投資資産 vs 円建てVT架空運用）。
+    ベンチマーク価格が取得できない場合もユーザー系列だけは返す。
+    """
+    # ベンチマーク価格キャッシュを更新（失敗しても続行＝ユーザー系列のみ表示）
+    benchmark_error = ensure_cache_fresh(db, DEFAULT_SYMBOL)
+    if benchmark_error is None:
+        benchmark_error = ensure_cache_fresh(db, FX_SYMBOL)
+
+    series = compute_history_series(db, current_user.id, DEFAULT_SYMBOL)
+    if series is None:
+        return {
+            "has_data": False,
+            "message": "資産推移データが不足しています（最低2時点分の資産スナップショットが必要です）",
+        }
+
+    return {
+        "has_data": True,
+        "benchmark_symbol": DEFAULT_SYMBOL,
+        "benchmark_error": benchmark_error,
+        "points": [
+            {
+                "date": p["date"].isoformat(),
+                "user_man": round(p["user_yen"] / 10000),
+                "benchmark_man": round(p["benchmark_yen"] / 10000) if p["benchmark_yen"] is not None else None,
+            }
+            for p in series["points"]
+        ],
     }
 
 

@@ -8,8 +8,14 @@ from sqlalchemy.orm import sessionmaker
 
 from backend.core.database import Base
 from backend.models.user import User
-from backend.models.performance import AssetSnapshot, CashFlowEvent
-from backend.services.performance_calc import modified_dietz, compute_user_performance, CashFlow
+from backend.models.performance import AssetSnapshot, CashFlowEvent, BenchmarkPrice
+from backend.services.benchmark import FX_SYMBOL
+from backend.services.performance_calc import (
+    modified_dietz,
+    compute_user_performance,
+    compute_history_series,
+    CashFlow,
+)
 
 
 class TestModifiedDietz:
@@ -171,3 +177,83 @@ class TestComputeUserPerformanceUsesInvestmentOnly:
         r = compute_user_performance(db, "u1")
         assert r is not None
         assert abs(r["period_return"] - 0.10) < 0.01
+
+
+class TestComputeHistorySeries:
+    def _add_prices(self, db, symbol_prices, fx_rate=100.0):
+        """VTドル価格とドル円レートを両方入れる（円建て換算に両方必要）"""
+        for d, p in symbol_prices:
+            db.add(BenchmarkPrice(symbol="VT", price_date=d, close_price=p))
+            db.add(BenchmarkPrice(symbol=FX_SYMBOL, price_date=d, close_price=fx_rate))
+        db.commit()
+
+    def test_returns_none_with_insufficient_snapshots(self, db):
+        db.add(AssetSnapshot(
+            user_id="u1", snapshot_date=date(2025, 1, 1),
+            total_assets_yen=1_000_000, cash_assets_yen=0, investment_assets_yen=1_000_000,
+        ))
+        db.commit()
+        assert compute_history_series(db, "u1", "VT") is None
+
+    def test_benchmark_tracks_price_growth(self, db):
+        """
+        VT価格が100→110（+10%）なら、架空VT評価額も開始残高の+10%になる。
+        開始残高100万円: 1万円/unit(=100ドル×100円)で100units → 110万円
+        """
+        db.add(AssetSnapshot(
+            user_id="u1", snapshot_date=date(2025, 1, 1),
+            total_assets_yen=1_000_000, cash_assets_yen=0, investment_assets_yen=1_000_000,
+        ))
+        db.add(AssetSnapshot(
+            user_id="u1", snapshot_date=date(2026, 1, 1),
+            total_assets_yen=1_200_000, cash_assets_yen=0, investment_assets_yen=1_200_000,
+        ))
+        self._add_prices(db, [(date(2025, 1, 1), 100.0), (date(2026, 1, 1), 110.0)])
+
+        s = compute_history_series(db, "u1", "VT")
+        assert s is not None
+        assert len(s["points"]) == 2
+        assert s["points"][0]["user_yen"] == 1_000_000
+        assert abs(s["points"][0]["benchmark_yen"] - 1_000_000) < 1
+        assert s["points"][1]["user_yen"] == 1_200_000
+        assert abs(s["points"][1]["benchmark_yen"] - 1_100_000) < 1
+
+    def test_cash_flow_buys_units_at_flow_date_price(self, db):
+        """途中入金はその日の価格でVTを架空購入する"""
+        db.add(AssetSnapshot(
+            user_id="u1", snapshot_date=date(2025, 1, 1),
+            total_assets_yen=1_000_000, cash_assets_yen=0, investment_assets_yen=1_000_000,
+        ))
+        db.add(AssetSnapshot(
+            user_id="u1", snapshot_date=date(2026, 1, 1),
+            total_assets_yen=2_000_000, cash_assets_yen=0, investment_assets_yen=2_000_000,
+        ))
+        db.add(CashFlowEvent(
+            user_id="u1", flow_date=date(2025, 7, 1), amount_yen=550_000,
+            flow_type="deposit", source="manual",
+        ))
+        self._add_prices(db, [
+            (date(2025, 1, 1), 100.0),   # 100万円→100units
+            (date(2025, 7, 1), 110.0),   # 55万円→50units
+            (date(2026, 1, 1), 120.0),   # 150units×1.2万円=180万円
+        ])
+
+        s = compute_history_series(db, "u1", "VT")
+        assert abs(s["points"][1]["benchmark_yen"] - 1_800_000) < 1
+
+    def test_missing_prices_degrade_to_user_series_only(self, db):
+        """ベンチマーク価格が無くてもユーザー系列は返る（benchmark_yen=None）"""
+        db.add(AssetSnapshot(
+            user_id="u1", snapshot_date=date(2025, 1, 1),
+            total_assets_yen=1_000_000, cash_assets_yen=0, investment_assets_yen=1_000_000,
+        ))
+        db.add(AssetSnapshot(
+            user_id="u1", snapshot_date=date(2026, 1, 1),
+            total_assets_yen=1_200_000, cash_assets_yen=0, investment_assets_yen=1_200_000,
+        ))
+        db.commit()
+
+        s = compute_history_series(db, "u1", "VT")
+        assert s is not None
+        assert all(p["benchmark_yen"] is None for p in s["points"])
+        assert [p["user_yen"] for p in s["points"]] == [1_000_000, 1_200_000]

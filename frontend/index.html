@@ -948,6 +948,13 @@
   <!-- 実績サマリー -->
   <div id="perfSummaryCard" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;"></div>
 
+  <!-- 資産推移グラフ（実績 vs VT架空運用） -->
+  <div id="perfHistoryCard" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;display:none;">
+    <div style="font-size:1rem;font-weight:600;margin-bottom:4px;">📊 投資資産の推移</div>
+    <div style="font-size:.78rem;color:var(--text2);margin-bottom:14px;">実際の投資資産と、同じ入金タイミングで円建てVT(全世界株)を買っていた場合の比較</div>
+    <canvas id="perfHistoryChart" style="max-height:320px;"></canvas>
+  </div>
+
   <!-- FIRE到達予測 -->
   <div id="fireProjectionCard" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;"></div>
 
@@ -2239,8 +2246,44 @@ function fmtYen(v) {
 async function initPerformancePage() {
   if (!token) return;
   loadPerformanceSummary();
+  loadPerformanceHistory();
   loadFireProjection();
   loadCashFlows();
+}
+
+async function loadPerformanceHistory() {
+  const card = document.getElementById('perfHistoryCard');
+  try {
+    const h = await api('GET', '/performance/history');
+    if (!h.has_data || h.points.length < 2) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+
+    const hasBench = h.points.some(p => p.benchmark_man !== null);
+    const datasets = [{
+      label: 'あなたの投資資産',
+      data: h.points.map(p => p.user_man),
+      borderColor: '#6c63ff',
+      backgroundColor: 'rgba(108,99,255,.12)',
+      fill: true, tension: 0.3, pointRadius: 2,
+    }];
+    if (hasBench) {
+      datasets.push({
+        label: `円建て${h.benchmark_symbol}で運用した場合`,
+        data: h.points.map(p => p.benchmark_man),
+        borderColor: '#4ecdc4',
+        borderDash: [6, 3],
+        fill: false, tension: 0.3, pointRadius: 2,
+      });
+    }
+    destroyChart('perfHistoryChart');
+    chartInsts['perfHistoryChart'] = new Chart(document.getElementById('perfHistoryChart'), {
+      type: 'line',
+      data: { labels: h.points.map(p => p.date), datasets },
+      options: { ...CHART_OPTS },
+    });
+  } catch (e) {
+    card.style.display = 'none';
+  }
 }
 
 async function loadFireProjection() {

@@ -83,6 +83,64 @@ def compute_user_performance(db: Session, user_id: str) -> Optional[dict]:
     return modified_dietz(v0, v1, t0, t1, flows)
 
 
+def compute_history_series(db: Session, user_id: str, symbol: str) -> Optional[dict]:
+    """
+    資産推移グラフ用の時系列を返す。
+    各スナップショット日について、実際の投資資産額と、
+    「同じ入金タイミングで円建てVTを買っていた場合」の架空評価額を並べる。
+
+    戻り値: {"points": [{"date", "user_yen", "benchmark_yen"|None}, ...]}
+    ベンチマーク価格が無い日はbenchmark_yen=Noneでユーザー系列だけ返す（劣化動作）。
+    """
+    snapshots = (
+        db.query(AssetSnapshot)
+        .filter(AssetSnapshot.user_id == user_id)
+        .order_by(AssetSnapshot.snapshot_date)
+        .all()
+    )
+    if len(snapshots) < 2:
+        return None
+
+    t0 = snapshots[0].snapshot_date
+    v0 = snapshots[0].investment_assets_yen
+    t1 = snapshots[-1].snapshot_date
+
+    flows_db = (
+        db.query(CashFlowEvent)
+        .filter(
+            CashFlowEvent.user_id == user_id,
+            CashFlowEvent.flow_date > t0,
+            CashFlowEvent.flow_date <= t1,
+        )
+        .order_by(CashFlowEvent.flow_date)
+        .all()
+    )
+    # 開始残高v0はt0時点の架空入金として扱う（compute_benchmark_performanceと同じ対称化）
+    synthetic_flows = [CashFlow(t0, float(v0))] + [CashFlow(f.flow_date, f.amount_yen) for f in flows_db]
+
+    points = []
+    units = 0.0
+    flow_idx = 0
+    for snap in snapshots:
+        d = snap.snapshot_date
+        # この日までに発生したキャッシュフローを架空VT購入としてユニット化
+        while flow_idx < len(synthetic_flows) and synthetic_flows[flow_idx].flow_date <= d:
+            f = synthetic_flows[flow_idx]
+            p = get_price_jpy_on_or_before(db, symbol, f.flow_date)
+            if p is not None and p > 0:
+                units += f.amount_yen / p
+            flow_idx += 1
+
+        price = get_price_jpy_on_or_before(db, symbol, d)
+        bench_yen = units * price if (price is not None and units > 0) else None
+        points.append({
+            "date": d,
+            "user_yen": snap.investment_assets_yen,
+            "benchmark_yen": bench_yen,
+        })
+    return {"points": points}
+
+
 def compute_benchmark_performance(
     db: Session, symbol: str, t0: date, v0: float, t1: date, flows: list[CashFlow],
     in_jpy: bool = True,
