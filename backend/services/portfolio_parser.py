@@ -74,7 +74,18 @@ def parse_portfolio_paste(text: str) -> list[ParsedHolding]:
     マネフォportfolioページのコピペテキストを解析し、保有銘柄・口座のリストを返す。
     未知のセクション・解析できない行は無視する（部分的に崩れたペーストでも動くように）。
     """
+    holdings, _ = parse_portfolio_paste_with_sections(text)
+    return holdings
+
+
+def parse_portfolio_paste_with_sections(text: str) -> tuple[list[ParsedHolding], set[str]]:
+    """
+    parse_portfolio_pasteと同じ解析を行い、加えて「見出しを検出できたセクション」の
+    集合も返す。コピー範囲の見落とし（例: 現金セクションだけ選択範囲から漏れていた）を
+    呼び出し側で検知できるようにするため。
+    """
     holdings: list[ParsedHolding] = []
+    detected_sections: set[str] = set()
     current_section: Optional[str] = None
 
     for raw_line in text.splitlines():
@@ -91,6 +102,7 @@ def parse_portfolio_paste(text: str) -> list[ParsedHolding]:
                 break
         if matched_section:
             current_section = matched_section
+            detected_sections.add(matched_section)
             continue
 
         if current_section is None:
@@ -128,4 +140,4 @@ def parse_portfolio_paste(text: str) -> list[ParsedHolding]:
             symbol_code=symbol_code,
         ))
 
-    return holdings
+    return holdings, detected_sections

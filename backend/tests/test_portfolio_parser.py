@@ -4,7 +4,7 @@
 （各セクションの行構造・ヘッダー折り返しパターンは実際のコピー結果を再現）
 """
 import pytest
-from backend.services.portfolio_parser import parse_portfolio_paste
+from backend.services.portfolio_parser import parse_portfolio_paste, parse_portfolio_paste_with_sections
 
 SAMPLE_PASTE = """預金・現金
 合計：1,000,000円
@@ -144,3 +144,27 @@ class TestSecurityKey:
         mub_holdings = [h for h in holdings if h.symbol_code == "8306"]
         assert len(mub_holdings) == 2
         assert mub_holdings[0].security_key == mub_holdings[1].security_key
+
+
+class TestParsePortfolioPasteWithSections:
+    def test_detects_all_five_sections(self):
+        """SAMPLE_PASTEは5セクション全てを含む"""
+        _, sections = parse_portfolio_paste_with_sections(SAMPLE_PASTE)
+        assert sections == {"現金", "株式", "投資信託", "年金", "ポイント"}
+
+    def test_missing_section_not_detected(self):
+        """
+        コピー範囲の見落とし再現: 先頭の現金セクションを含まないテキストを渡すと、
+        「現金」がdetected_sectionsに含まれない（=呼び出し側で欠落検知できる）
+        """
+        without_cash = SAMPLE_PASTE.split("株式(現物)", 1)
+        text = "株式(現物)" + without_cash[1]
+        _, sections = parse_portfolio_paste_with_sections(text)
+        assert "現金" not in sections
+        assert "株式" in sections
+
+    def test_holdings_unaffected_by_section_tracking(self):
+        """検出セクションの追跡がholdingsの解析結果自体に影響しないことを確認"""
+        holdings_a = parse_portfolio_paste(SAMPLE_PASTE)
+        holdings_b, _ = parse_portfolio_paste_with_sections(SAMPLE_PASTE)
+        assert len(holdings_a) == len(holdings_b)

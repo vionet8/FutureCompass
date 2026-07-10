@@ -2806,7 +2806,13 @@ async function submitPortfolioPaste() {
   resultEl.innerHTML = '<div style="color:var(--text2);font-size:.85rem;">取り込み中...</div>';
   try {
     const r = await api('POST', '/portfolio/snapshot', { text });
-    resultEl.innerHTML = `<div class="alert alert-success">✅ ${r.holdings_count}件の保有銘柄を取り込みました（合計 ${Math.round(r.total_value_yen / 10000).toLocaleString()}万円）</div>`;
+    let msg = `✅ ${r.holdings_count}件の保有銘柄を取り込みました（合計 ${Math.round(r.total_value_yen / 10000).toLocaleString()}万円）`;
+    let alertClass = 'alert-success';
+    if (r.missing_sections && r.missing_sections.length > 0) {
+      msg += `<br>⚠️ 「${r.missing_sections.join('」「')}」セクションが見つかりませんでした。コピー範囲が途中から始まっていないか確認してください（元々そのセクションに何も保有していない場合は問題ありません）。`;
+      alertClass = 'alert-error';
+    }
+    resultEl.innerHTML = `<div class="alert ${alertClass}">${msg}</div>`;
     document.getElementById('portfolioPasteInput').value = '';
     await loadPortfolioAxes();
     loadPortfolioBreakdown();

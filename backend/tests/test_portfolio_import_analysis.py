@@ -73,6 +73,25 @@ class TestImportPortfolioPaste:
         expected = 100_000 + 10_000 + 300_000 + 200_000 + 100_000
         assert result["total_value_yen"] == expected
 
+    def test_missing_sections_reported(self, db):
+        """
+        SAMPLE_PASTEには年金・ポイントセクションが元々含まれていない。
+        コピー範囲の見落とし（例:先頭の現金セクションが選択範囲から漏れる）に
+        気づけるよう、検出できなかったセクション名を返す回帰テスト。
+        """
+        result = import_portfolio_paste(db, "u1", SAMPLE_PASTE)
+        assert set(result["missing_sections"]) == {"年金", "ポイント"}
+
+    def test_no_missing_sections_when_all_present(self, db):
+        full_paste = SAMPLE_PASTE + (
+            "年金\n合計：50,000円\n名称\t取得価額\t現在価値\t評価損益\t評価損益率\t取得日\t変更\t削除\n"
+            "テストDC\t40,000円\t50,000円\t10,000円\t25.00%\n"
+            "ポイント\n合計：1,000円\n名称\t種類\tポイント・マイル数\t換算レート\t現在の価値\t有効期限\t保有金融機関\t変更\t削除\n"
+            "テストポイント\tポイント\t1000ポイント\t1.00\t1,000円\t\tテストカード\n"
+        )
+        result = import_portfolio_paste(db, "u1", full_paste)
+        assert result["missing_sections"] == []
+
     def test_creates_auto_tags(self, db):
         import_portfolio_paste(db, "u1", SAMPLE_PASTE)
         tags = db.query(SecurityTag).filter(SecurityTag.security_key == "投資信託:SBI・iシェアーズ・ゴールドファンド(為替ヘッジなし)").all()
