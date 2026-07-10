@@ -2875,6 +2875,8 @@ async function loadPortfolioBreakdown() {
   }
 }
 
+const PORTFOLIO_CATEGORY_ORDER = ['現金', '株式', '投資信託', '年金', 'ポイント'];
+
 async function loadPortfolioSecurities() {
   const card = document.getElementById('portfolioSecuritiesCard');
   try {
@@ -2884,42 +2886,66 @@ async function loadPortfolioSecurities() {
 
     const TIME_HORIZON_OPTIONS = ['長期', '中期', '短期（1年以内）'];
     const axisCols = portfolioAxes.map(a => `<th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);color:var(--text2);font-size:.78rem;">${a.label}</th>`).join('');
-    const rows = securities.map(s => {
-      const cells = portfolioAxes.map(a => {
-        const current = s.tags[a.key] || '';
-        if (a.key === 'time_horizon') {
-          const opts = ['<option value="">未設定</option>', ...TIME_HORIZON_OPTIONS.map(v =>
-            `<option value="${v}" ${v === current ? 'selected' : ''}>${v}</option>`)].join('');
+
+    const byCategory = {};
+    for (const s of securities) {
+      (byCategory[s.category] ||= []).push(s);
+    }
+    const categories = [
+      ...PORTFOLIO_CATEGORY_ORDER.filter(c => byCategory[c]),
+      ...Object.keys(byCategory).filter(c => !PORTFOLIO_CATEGORY_ORDER.includes(c)),
+    ];
+
+    const sections = categories.map(cat => {
+      const items = byCategory[cat];
+      const rows = items.map(s => {
+        const cells = portfolioAxes.map(a => {
+          const current = s.tags[a.key] || '';
+          if (a.key === 'time_horizon') {
+            const opts = ['<option value="">未設定</option>', ...TIME_HORIZON_OPTIONS.map(v =>
+              `<option value="${v}" ${v === current ? 'selected' : ''}>${v}</option>`)].join('');
+            return `
+              <td style="padding:6px 10px;border-bottom:1px solid var(--border);">
+                <select style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:.8rem;width:130px;"
+                  onchange="updateSecurityTag('${s.security_key}', '${a.key}', this.value)">${opts}</select>
+              </td>
+            `;
+          }
           return `
             <td style="padding:6px 10px;border-bottom:1px solid var(--border);">
-              <select style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:.8rem;width:130px;"
-                onchange="updateSecurityTag('${s.security_key}', '${a.key}', this.value)">${opts}</select>
+              <input type="text" value="${current.replace(/"/g, '&quot;')}"
+                style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:.8rem;width:120px;"
+                onchange="updateSecurityTag('${s.security_key}', '${a.key}', this.value)">
             </td>
           `;
-        }
-        return `
-          <td style="padding:6px 10px;border-bottom:1px solid var(--border);">
-            <input type="text" value="${current.replace(/"/g, '&quot;')}"
-              style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:.8rem;width:120px;"
-              onchange="updateSecurityTag('${s.security_key}', '${a.key}', this.value)">
-          </td>
-        `;
+        }).join('');
+        return `<tr>
+          <td style="padding:6px 10px;border-bottom:1px solid var(--border);">${s.name}</td>
+          <td style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right;">${(s.market_value_yen / 10000).toFixed(1)}万円</td>
+          ${cells}
+        </tr>`;
       }).join('');
-      return `<tr>
-        <td style="padding:6px 10px;border-bottom:1px solid var(--border);">${s.name}</td>
-        <td style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right;">${Math.round(s.market_value_yen / 10000).toLocaleString()}万円</td>
-        ${cells}
-      </tr>`;
+      const subtotal = items.reduce((sum, s) => sum + s.market_value_yen, 0);
+
+      return `
+        <div style="border:1px solid var(--border);border-radius:10px;margin-bottom:14px;overflow:hidden;">
+          <div style="background:var(--bg3);padding:8px 12px;font-size:.85rem;font-weight:600;display:flex;justify-content:space-between;">
+            <span>${cat}</span>
+            <span style="color:var(--text2);font-weight:400;">${items.length}件　${(subtotal / 10000).toFixed(1)}万円</span>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:.85rem;">
+            <thead><tr>
+              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);color:var(--text2);font-size:.78rem;">銘柄</th>
+              <th style="padding:8px 10px;text-align:right;border-bottom:1px solid var(--border);color:var(--text2);font-size:.78rem;">評価額</th>
+              ${axisCols}
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
     }).join('');
 
-    document.getElementById('portfolioSecuritiesTable').innerHTML = `
-      <thead><tr>
-        <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);color:var(--text2);font-size:.78rem;">銘柄</th>
-        <th style="padding:8px 10px;text-align:right;border-bottom:1px solid var(--border);color:var(--text2);font-size:.78rem;">評価額</th>
-        ${axisCols}
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    `;
+    document.getElementById('portfolioSecuritiesTable').outerHTML = `<div id="portfolioSecuritiesTable">${sections}</div>`;
   } catch (e) {
     card.style.display = 'none';
   }
