@@ -23,6 +23,14 @@ from ..services.mf_import import (
 )
 from ..models.auto_import import AutoImportConfig, ImportedFile
 from ..services.ai_report import generate_household_analysis
+from ..services.transaction_rules import (
+    apply_rules_and_overrides,
+    list_rules,
+    create_rule,
+    delete_rule,
+    set_transaction_override,
+)
+from ..services.transaction_ai_review import request_ai_suggestions
 from ..core.security import decrypt_value
 from .auth import get_current_user
 
@@ -102,15 +110,21 @@ def get_available_months(
     return [{"year": int(r.year), "month": int(r.month), "count": r.count} for r in rows]
 
 
-def _load_transactions(user_id: str, db: Session) -> list[dict]:
+def _load_transactions(user_id: str, db: Session, apply_corrections: bool = True) -> list[dict]:
+    """
+    取引一覧を返す。apply_corrections=True（既定）の場合、個別上書き・パターンルールを
+    適用した実効値（category_major/category_minor/is_transfer）に差し替える。
+    元のインポート値は category_major_raw 等に残る。
+    """
     rows = (
         db.query(MFTransaction)
         .filter(MFTransaction.user_id == user_id)
         .order_by(MFTransaction.transaction_date)
         .all()
     )
-    return [
+    transactions = [
         {
+            "id": r.id,
             "date": r.transaction_date,
             "description": r.description,
             "amount_yen": r.amount_yen,
@@ -121,9 +135,17 @@ def _load_transactions(user_id: str, db: Session) -> list[dict]:
             "is_transfer": r.is_transfer,
             "is_target": r.is_target,
             "mf_id": r.mf_id,
+            "category_major_override": r.category_major_override,
+            "category_minor_override": r.category_minor_override,
+            "is_transfer_override": r.is_transfer_override,
         }
         for r in rows
     ]
+    if not apply_corrections:
+        return transactions
+
+    rules = list_rules(db, user_id)
+    return apply_rules_and_overrides(transactions, rules)
 
 
 @router.get("/summary/{year}/{month}")
@@ -237,6 +259,138 @@ def get_ai_analysis(
         "ai_report": report,
         "disclaimer": "本レポートは情報提供を目的としており、投資助言ではありません。",
     }
+
+
+# ──────────────────────────────────────────────
+# 取引の分類修正（個別上書き・パターンルール・AI提案）
+# ──────────────────────────────────────────────
+
+class TransactionOverrideInput(BaseModel):
+    category_major: Optional[str] = None
+    category_minor: Optional[str] = None
+    is_transfer: Optional[bool] = None
+
+
+class RuleInput(BaseModel):
+    match_field: str  # "description" | "institution"
+    match_value: str
+    set_is_transfer: Optional[bool] = None
+    set_category_major: Optional[str] = None
+    set_category_minor: Optional[str] = None
+
+
+@router.put("/transactions/{transaction_id}/override")
+def put_transaction_override(
+    transaction_id: str,
+    body: TransactionOverrideInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """1件の取引を手動で修正する（再インポートしても保持される）"""
+    txn = set_transaction_override(
+        db, current_user.id, transaction_id,
+        category_major=body.category_major,
+        category_minor=body.category_minor,
+        is_transfer=body.is_transfer,
+        source="manual",
+    )
+    if txn is None:
+        raise HTTPException(status_code=404, detail="取引が見つかりません")
+    return {"status": "updated", "transaction_id": transaction_id}
+
+
+@router.get("/rules")
+def get_rules(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """登録済みのパターンルール一覧を返す"""
+    rules = list_rules(db, current_user.id)
+    return [
+        {
+            "id": r.id,
+            "match_field": r.match_field,
+            "match_value": r.match_value,
+            "set_is_transfer": r.set_is_transfer,
+            "set_category_major": r.set_category_major,
+            "set_category_minor": r.set_category_minor,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rules
+    ]
+
+
+@router.post("/rules")
+def post_rule(
+    body: RuleInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """パターンルールを追加する。既存の該当取引にも読み込み時点で即座に反映される"""
+    try:
+        rule = create_rule(
+            db, current_user.id, body.match_field, body.match_value,
+            set_is_transfer=body.set_is_transfer,
+            set_category_major=body.set_category_major,
+            set_category_minor=body.set_category_minor,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"id": rule.id, "match_field": rule.match_field, "match_value": rule.match_value}
+
+
+@router.delete("/rules/{rule_id}")
+def delete_rule_endpoint(
+    rule_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """パターンルールを削除する"""
+    ok = delete_rule(db, current_user.id, rule_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="ルールが見つかりません")
+    return {"deleted": True}
+
+
+@router.post("/ai-review")
+def post_ai_review(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    直近の取引をAIでレビューし、振替漏れ・分類誤りの疑いがある取引の修正案を返す。
+    ここでは修正を確定させない（提案の提示のみ）。適用は
+    PUT /transactions/{id}/override または POST /rules で行う。
+    """
+    transactions = _load_transactions(current_user.id, db, apply_corrections=False)
+    if not transactions:
+        return {"has_data": False, "message": "取引データがありません。先にCSVを取り込んでください。"}
+
+    suggestions = request_ai_suggestions(transactions)
+
+    txn_by_id = {t["id"]: t for t in transactions}
+    enriched = []
+    for s in suggestions:
+        txn = txn_by_id.get(s.get("transaction_id"))
+        if txn is None:
+            continue
+        enriched.append({
+            "transaction_id": txn["id"],
+            "date": txn["date"].isoformat(),
+            "description": txn["description"],
+            "amount_yen": txn["amount_yen"],
+            "institution": txn["institution"],
+            "current_category_major": txn["category_major"],
+            "current_category_minor": txn["category_minor"],
+            "current_is_transfer": txn["is_transfer"],
+            "issue": s.get("issue"),
+            "suggested_category_major": s.get("suggested_category_major"),
+            "suggested_category_minor": s.get("suggested_category_minor"),
+            "suggested_is_transfer": s.get("suggested_is_transfer"),
+            "reasoning": s.get("reasoning"),
+        })
+
+    return {"has_data": True, "reviewed_count": len(transactions), "suggestions": enriched}
 
 
 # ──────────────────────────────────────────────

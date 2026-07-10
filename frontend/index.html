@@ -864,6 +864,19 @@
     <div id="aiRecentFiles" style="margin-top:8px;"></div>
   </div>
 
+  <!-- AI取引レビュー -->
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:8px;">
+      <div style="font-size:1rem;font-weight:600;">🔍 AI取引レビュー</div>
+      <button class="btn-secondary" style="padding:8px 18px;border-radius:8px;" onclick="runTransactionAiReview()" id="txnReviewBtn">レビュー実行</button>
+    </div>
+    <div style="font-size:.82rem;color:var(--text2);margin-bottom:14px;line-height:1.7;">
+      投資の振替が収支に混ざっている等、分類が怪しい取引をAIが検出します。承認すると即座に修正され、「今後も同様に扱う」を選べばルール化されて以後の取引にも自動適用されます。
+    </div>
+    <div id="txnReviewResult"></div>
+    <div id="txnRulesList" style="margin-top:16px;"></div>
+  </div>
+
   <!-- 月選択 + 分析ボタン -->
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:20px;display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;">
     <div class="form-group" style="margin:0;flex:1;min-width:160px;">
@@ -2115,6 +2128,7 @@ async function scanNow() {
 async function initHouseholdPage() {
   if (!token) return;
   loadAutoImport();
+  loadTransactionRules();
   // 利用可能な月を取得してセレクトを構築
   try {
     const months = await api('GET', '/household/months');
@@ -2136,6 +2150,135 @@ async function initHouseholdPage() {
       </div>`;
     }
   } catch (e) { /* データなし時はスルー */ }
+}
+
+// ===== AI TRANSACTION REVIEW =====
+async function runTransactionAiReview() {
+  const btn = document.getElementById('txnReviewBtn');
+  const resultEl = document.getElementById('txnReviewResult');
+  btn.disabled = true;
+  btn.textContent = 'レビュー中...';
+  resultEl.innerHTML = '<div style="color:var(--text2);font-size:.85rem;">AIが取引を確認しています（少し時間がかかります）...</div>';
+  try {
+    const r = await api('POST', '/household/ai-review');
+    if (!r.has_data) {
+      resultEl.innerHTML = `<div style="color:var(--text2);font-size:.85rem;">${r.message}</div>`;
+      return;
+    }
+    if (!r.suggestions.length) {
+      resultEl.innerHTML = `<div class="alert alert-success">✅ ${r.reviewed_count}件を確認しましたが、怪しい取引は見つかりませんでした。</div>`;
+      return;
+    }
+    resultEl.innerHTML = `
+      <div style="font-size:.85rem;color:var(--text2);margin-bottom:10px;">${r.reviewed_count}件中、${r.suggestions.length}件の疑わしい取引が見つかりました。</div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        ${r.suggestions.map((s, i) => renderSuggestionCard(s, i)).join('')}
+      </div>
+    `;
+    window._txnSuggestions = r.suggestions;
+  } catch (e) {
+    resultEl.innerHTML = `<div class="alert alert-error">❌ ${e.message}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'レビュー実行';
+  }
+}
+
+function renderSuggestionCard(s, i) {
+  const changes = [];
+  if (s.suggested_is_transfer !== null && s.suggested_is_transfer !== s.current_is_transfer) {
+    changes.push(`振替: ${s.current_is_transfer ? 'あり' : 'なし'} → ${s.suggested_is_transfer ? 'あり' : 'なし'}`);
+  }
+  if (s.suggested_category_major) {
+    changes.push(`大項目: ${s.current_category_major || '(なし)'} → ${s.suggested_category_major}`);
+  }
+  if (s.suggested_category_minor) {
+    changes.push(`中項目: ${s.current_category_minor || '(なし)'} → ${s.suggested_category_minor}`);
+  }
+  return `
+    <div id="suggestion-${i}" style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px;">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:6px;">
+        <div style="font-weight:600;">${s.date}　${s.description || '(内容なし)'}</div>
+        <div style="color:var(--text2);">${s.amount_yen.toLocaleString()}円</div>
+      </div>
+      <div style="font-size:.8rem;color:var(--warn);margin-bottom:6px;">⚠ ${s.issue}</div>
+      <div style="font-size:.82rem;color:var(--text2);margin-bottom:8px;">${changes.join('　')}</div>
+      <div style="font-size:.78rem;color:var(--text2);margin-bottom:10px;">理由: ${s.reasoning || ''}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <button class="btn-primary" style="padding:6px 14px;border-radius:6px;font-size:.8rem;" onclick="acceptSuggestion(${i}, false)">この1件だけ修正</button>
+        <button class="btn-secondary" style="padding:6px 14px;border-radius:6px;font-size:.8rem;" onclick="acceptSuggestion(${i}, true)">今後も同様に扱う（ルール化）</button>
+        <button class="btn-secondary" style="padding:6px 14px;border-radius:6px;font-size:.8rem;" onclick="dismissSuggestion(${i})">無視</button>
+      </div>
+    </div>
+  `;
+}
+
+async function acceptSuggestion(i, createRule) {
+  const s = window._txnSuggestions[i];
+  const overrideBody = {};
+  if (s.suggested_is_transfer !== null) overrideBody.is_transfer = s.suggested_is_transfer;
+  if (s.suggested_category_major) overrideBody.category_major = s.suggested_category_major;
+  if (s.suggested_category_minor) overrideBody.category_minor = s.suggested_category_minor;
+
+  try {
+    await api('PUT', `/household/transactions/${s.transaction_id}/override`, overrideBody);
+    if (createRule) {
+      const ruleBody = {
+        match_field: 'description',
+        match_value: s.description,
+        set_is_transfer: s.suggested_is_transfer,
+        set_category_major: s.suggested_category_major,
+        set_category_minor: s.suggested_category_minor,
+      };
+      await api('POST', '/household/rules', ruleBody);
+      loadTransactionRules();
+    }
+    const card = document.getElementById(`suggestion-${i}`);
+    if (card) card.innerHTML = `<div style="color:var(--accent2);font-size:.85rem;">✅ 修正しました${createRule ? '（ルール登録済み）' : ''}</div>`;
+    loadHouseholdSummary();
+  } catch (e) {
+    alert('修正の適用に失敗しました: ' + e.message);
+  }
+}
+
+function dismissSuggestion(i) {
+  const card = document.getElementById(`suggestion-${i}`);
+  if (card) card.style.display = 'none';
+}
+
+async function loadTransactionRules() {
+  const el = document.getElementById('txnRulesList');
+  try {
+    const rules = await api('GET', '/household/rules');
+    if (!rules.length) { el.innerHTML = ''; return; }
+    el.innerHTML = `
+      <div style="font-size:.8rem;color:var(--text2);margin-bottom:6px;">適用中のルール（${rules.length}件）</div>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        ${rules.map(r => `
+          <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg3);border-radius:8px;padding:8px 12px;font-size:.8rem;">
+            <div>${r.match_field === 'description' ? '内容' : '金融機関'}に「${r.match_value}」を含む取引 →
+              ${r.set_is_transfer !== null ? `振替${r.set_is_transfer ? 'あり' : 'なし'}　` : ''}
+              ${r.set_category_major ? `大項目:${r.set_category_major}　` : ''}
+              ${r.set_category_minor ? `中項目:${r.set_category_minor}` : ''}
+            </div>
+            <button class="btn-secondary" style="padding:3px 10px;border-radius:6px;font-size:.75rem;" onclick="deleteTransactionRule('${r.id}')">削除</button>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } catch (e) {
+    el.innerHTML = '';
+  }
+}
+
+async function deleteTransactionRule(ruleId) {
+  try {
+    await api('DELETE', `/household/rules/${ruleId}`);
+    loadTransactionRules();
+    loadHouseholdSummary();
+  } catch (e) {
+    alert('ルールの削除に失敗しました: ' + e.message);
+  }
 }
 
 async function importMfCsv(input) {
