@@ -71,6 +71,7 @@ def get_wealth_percentile(
         "total_assets_man": round(total_assets_man),
         "top_percent": result.top_percent,
         "percentile_from_bottom": result.percentile_from_bottom,
-        "distribution": result.distribution,
+        "pyramid": result.pyramid,
+        "user_threshold_man": result.user_threshold_man,
         "source": "家計の金融行動に関する世論調査（二人以上世帯、金融資産保有額）の年代別分布データに基づく近似値",
     }

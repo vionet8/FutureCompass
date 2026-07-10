@@ -14,7 +14,6 @@ from typing import Optional
 
 # 区分の上限（万円）。インデックスiは「boundaries[i-1]〜boundaries[i]」区分に対応（0番目は非保有=0円）
 BUCKET_BOUNDARIES_MAN = [0, 100, 500, 1000, 2000, 3000]
-BUCKET_LABELS = ["資産なし", "〜100万円", "100〜500万円", "500〜1000万円", "1000〜2000万円", "2000〜3000万円", "3000万円〜"]
 
 # 年代別・区分別の世帯割合(%)。合計が100%にならない分は「無回答」のため正規化して使う
 AGE_BAND_RAW_PCT: dict[str, list[float]] = {
@@ -27,6 +26,10 @@ AGE_BAND_RAW_PCT: dict[str, list[float]] = {
 }
 
 TOP_BUCKET_CAP_MAN = 10000  # 3000万円超の分布を近似するための上限（1億円でほぼ全員を上回るとみなす）
+
+# ピラミッド表示用の閾値（万円）。「◯万円以上の世帯は何%か」を計算する基準点。
+# 3000万円超は公表データが無いため、TOP_BUCKET_CAP_MANまでの線形補間で近似する。
+PYRAMID_THRESHOLDS_MAN = [0, 100, 500, 1000, 2000, 3000, 4000, 5000, 7000, 10000]
 
 
 def age_band(age: int) -> Optional[str]:
@@ -56,13 +59,42 @@ def _cumulative_pct(band: str) -> list[float]:
     return cum  # len == len(BUCKET_BOUNDARIES_MAN)
 
 
+def _percentile_from_bottom_at(band: str, value_man: float) -> float:
+    """
+    年代bandにおいて、資産額value_man(万円)が「資産が少ない方から数えて何%目」に
+    位置するかを、公表区分の累積%を用いた線形補間で推定する（0〜100の範囲）。
+    """
+    cum = _cumulative_pct(band)
+    boundaries = BUCKET_BOUNDARIES_MAN
+
+    if value_man <= 0:
+        result = cum[0] / 2  # 非保有層の中央値的な位置とみなす
+    elif value_man >= boundaries[-1]:
+        top_bucket_start_cum = cum[-1]
+        frac = min(1.0, (value_man - boundaries[-1]) / (TOP_BUCKET_CAP_MAN - boundaries[-1]))
+        result = top_bucket_start_cum + frac * (100 - top_bucket_start_cum)
+    else:
+        # boundaries[i]は常にcum[i]（その額以下の世帯累積割合）に対応するため、
+        # 区間(boundaries[i], boundaries[i+1])内はcum[i]〜cum[i+1]で線形補間する
+        result = cum[-1]
+        for i in range(len(boundaries) - 1):
+            lo, hi = boundaries[i], boundaries[i + 1]
+            if lo <= value_man < hi:
+                lo_cum, hi_cum = cum[i], cum[i + 1]
+                frac = (value_man - lo) / (hi - lo)
+                result = lo_cum + frac * (hi_cum - lo_cum)
+                break
+
+    return max(0.0, min(100.0, result))
+
+
 @dataclass
 class PercentileResult:
     age_band: str
     percentile_from_bottom: float  # 資産が少ない方から数えて何%目か
     top_percent: float             # 資産が多い方から数えて上位何%か
-    bucket_index: int              # ユーザーが属する分布区分のインデックス
-    distribution: list[dict]       # チャート描画用の区分別データ
+    pyramid: list[dict]            # ピラミッド表示用: 各閾値以上の世帯割合（累積、下ほど大きい）
+    user_threshold_man: int        # ユーザーが到達している最大の閾値（ピラミッドのハイライト用）
 
 
 def compute_wealth_percentile(age: int, total_assets_man: float) -> Optional[PercentileResult]:
@@ -81,44 +113,32 @@ def compute_wealth_percentile_for_band(band: str, total_assets_man: float) -> Op
     if band not in AGE_BAND_RAW_PCT:
         return None
 
-    cum = _cumulative_pct(band)  # 6要素: boundary=0,100,500,1000,2000,3000における累積%
-    pct = _normalized_pct(band)  # 7要素: 各区分の世帯割合%
-    boundaries = BUCKET_BOUNDARIES_MAN
-
-    if total_assets_man <= 0:
-        percentile_from_bottom = cum[0] / 2  # 非保有層の中央値的な位置とみなす
-        bucket_index = 0
-    elif total_assets_man >= boundaries[-1]:
-        top_bucket_start_cum = cum[-1]
-        frac = min(1.0, (total_assets_man - boundaries[-1]) / (TOP_BUCKET_CAP_MAN - boundaries[-1]))
-        percentile_from_bottom = top_bucket_start_cum + frac * (100 - top_bucket_start_cum)
-        bucket_index = len(pct) - 1
-    else:
-        # boundaries[i]は常にcum[i]（その額以下の世帯累積割合）に対応するため、
-        # 区間(boundaries[i], boundaries[i+1])内はcum[i]〜cum[i+1]で線形補間する
-        percentile_from_bottom = cum[-1]
-        bucket_index = len(pct) - 2
-        for i in range(len(boundaries) - 1):
-            lo, hi = boundaries[i], boundaries[i + 1]
-            if lo <= total_assets_man < hi:
-                lo_cum, hi_cum = cum[i], cum[i + 1]
-                frac = (total_assets_man - lo) / (hi - lo)
-                percentile_from_bottom = lo_cum + frac * (hi_cum - lo_cum)
-                bucket_index = i + 1
-                break
-
-    percentile_from_bottom = max(0.0, min(100.0, percentile_from_bottom))
+    percentile_from_bottom = round(_percentile_from_bottom_at(band, total_assets_man), 1)
     top_percent = round(max(0.1, 100 - percentile_from_bottom), 1)
 
-    distribution = [
-        {"label": BUCKET_LABELS[i], "pct": round(pct[i], 1), "is_user_bucket": i == bucket_index}
-        for i in range(len(pct))
-    ]
+    user_threshold_man = 0
+    pyramid = []
+    for threshold in PYRAMID_THRESHOLDS_MAN:
+        # 「threshold万円以上の世帯は何%か」= 100 - (threshold未満の累積%)
+        # threshold自体をvalue_manとして評価すると「threshold以下」の累積%になるため、
+        # 「以上」を得るには境界のわずか下の値を評価してから100から引く
+        pct_below = _percentile_from_bottom_at(band, threshold - 0.01) if threshold > 0 else 0.0
+        pct_at_or_above = round(max(0.1, 100 - pct_below), 1)
+        pyramid.append({
+            "threshold_man": threshold,
+            "label": f"{threshold:,}万円以上" if threshold > 0 else "すべての世帯",
+            "pct_at_or_above": pct_at_or_above,
+        })
+        if total_assets_man >= threshold:
+            user_threshold_man = threshold
+
+    for row in pyramid:
+        row["is_user_level"] = row["threshold_man"] == user_threshold_man
 
     return PercentileResult(
         age_band=band,
-        percentile_from_bottom=round(percentile_from_bottom, 1),
+        percentile_from_bottom=percentile_from_bottom,
         top_percent=top_percent,
-        bucket_index=bucket_index,
-        distribution=distribution,
+        pyramid=pyramid,
+        user_threshold_man=user_threshold_man,
     )

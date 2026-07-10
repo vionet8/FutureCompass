@@ -2521,20 +2521,23 @@ async function loadWealthPercentile() {
         onclick="selectWealthAgeBand('${b}')">${b}${b === r.actual_age_band ? '（実年齢）' : ''}</button>
     `).join('');
 
-    // ピラミッド表示: 資産が多い区分ほど上に、世帯割合(pct)が幅に反映される中央揃えの横棒
-    const maxPct = Math.max(...r.distribution.map(d => d.pct), 1);
-    const pyramidRows = [...r.distribution].reverse().map(d => {
-      const widthPct = Math.max(4, (d.pct / maxPct) * 100); // 最低幅を確保して極小区分も見えるように
-      const barColor = d.is_user_bucket ? 'var(--accent)' : 'rgba(139,144,167,.35)';
-      const labelColor = d.is_user_bucket ? 'var(--text)' : 'var(--text2)';
+    // ピラミッド表示: 「◯万円以上を持つ世帯は何%か」の累積値なので、
+    // 閾値が高くなるほど単調に幅が狭くなり、正しいピラミッド形状になる。
+    // 閾値が高い(=レア)行ほど上に、低い(=ほぼ全員該当)行ほど下に並べる。
+    const rows = [...r.pyramid].sort((a, b) => b.threshold_man - a.threshold_man);
+    const maxPct = Math.max(...rows.map(d => d.pct_at_or_above), 1);
+    const pyramidRows = rows.map(d => {
+      const widthPct = Math.max(3, (d.pct_at_or_above / maxPct) * 100);
+      const barColor = d.is_user_level ? 'var(--accent)' : 'rgba(139,144,167,.35)';
+      const labelColor = d.is_user_level ? 'var(--text)' : 'var(--text2)';
       return `
-        <div style="display:flex;align-items:center;gap:10px;padding:3px 0;">
-          <div style="width:110px;flex-shrink:0;text-align:right;font-size:.76rem;color:${labelColor};font-weight:${d.is_user_bucket ? '700' : '400'};">
-            ${d.is_user_bucket ? '👉 ' : ''}${d.label}
+        <div style="display:flex;align-items:center;gap:10px;padding:2px 0;">
+          <div style="width:120px;flex-shrink:0;text-align:right;font-size:.74rem;color:${labelColor};font-weight:${d.is_user_level ? '700' : '400'};">
+            ${d.is_user_level ? '👉 ' : ''}${d.label}
           </div>
           <div style="flex:1;display:flex;justify-content:center;">
-            <div style="width:${widthPct}%;min-width:24px;height:26px;background:${barColor};border-radius:4px;display:flex;align-items:center;justify-content:center;transition:width .3s;">
-              <span style="font-size:.72rem;color:${d.is_user_bucket ? '#fff' : 'var(--text2)'};font-weight:${d.is_user_bucket ? '700' : '400'};">${d.pct}%</span>
+            <div style="width:${widthPct}%;min-width:22px;height:22px;background:${barColor};border-radius:4px;display:flex;align-items:center;justify-content:center;transition:width .3s;">
+              <span style="font-size:.68rem;color:${d.is_user_level ? '#fff' : 'var(--text2)'};font-weight:${d.is_user_level ? '700' : '400'};">${d.pct_at_or_above}%</span>
             </div>
           </div>
         </div>

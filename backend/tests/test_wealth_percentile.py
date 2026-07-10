@@ -4,7 +4,7 @@ from backend.services.wealth_percentile import (
     compute_wealth_percentile,
     compute_wealth_percentile_for_band,
     AGE_BAND_RAW_PCT,
-    BUCKET_BOUNDARIES_MAN,
+    PYRAMID_THRESHOLDS_MAN,
 )
 
 
@@ -32,7 +32,7 @@ class TestComputeWealthPercentile:
     def test_zero_assets_is_near_bottom(self):
         r = compute_wealth_percentile(45, 0)
         assert r is not None
-        assert r.bucket_index == 0
+        assert r.user_threshold_man == 0
         assert r.percentile_from_bottom < 20  # 非保有層の中間程度
 
     def test_percentile_monotonically_increases_with_assets(self):
@@ -51,21 +51,37 @@ class TestComputeWealthPercentile:
         r = compute_wealth_percentile(45, 100_000)
         assert r.top_percent <= 1.0
 
-    def test_bucket_boundaries_are_consistent_with_distribution_length(self):
-        """区分数(distribution)は boundaries+1（非保有含む）と一致する"""
+    def test_pyramid_length_matches_threshold_count(self):
         r = compute_wealth_percentile(45, 1500)
-        assert len(r.distribution) == len(BUCKET_BOUNDARIES_MAN) + 1
+        assert len(r.pyramid) == len(PYRAMID_THRESHOLDS_MAN)
 
-    def test_exactly_at_boundary_is_classified_into_upper_bucket(self):
-        """境界値ちょうど(例:1000万円)は上の区分に分類される"""
-        r = compute_wealth_percentile(45, 1000)
-        assert r.bucket_index == 4  # "1000〜2000万円"区分
-
-    def test_distribution_marks_user_bucket(self):
+    def test_pyramid_is_monotonically_non_increasing_toward_top(self):
+        """
+        ピラミッド表示の要件: 閾値が高くなるほど「その額以上を持つ世帯割合」は
+        単調に減少（またはtieで同じ）でなければならない。そうでないと下ほど広い
+        ピラミッド形状にならない。
+        """
         r = compute_wealth_percentile(45, 1500)
-        marked = [d for d in r.distribution if d["is_user_bucket"]]
+        pcts = [row["pct_at_or_above"] for row in r.pyramid]
+        assert all(pcts[i] >= pcts[i + 1] for i in range(len(pcts) - 1))
+
+    def test_user_threshold_is_highest_cleared_threshold(self):
+        """3500万円保有なら、閾値のうち3000万円以上まではクリアし4000万円はクリアしない"""
+        r = compute_wealth_percentile(45, 3500)
+        assert r.user_threshold_man == 3000
+
+    def test_pyramid_marks_exactly_one_user_level(self):
+        r = compute_wealth_percentile(45, 1500)
+        marked = [row for row in r.pyramid if row["is_user_level"]]
         assert len(marked) == 1
-        assert r.distribution[r.bucket_index]["is_user_bucket"]
+        assert marked[0]["threshold_man"] == r.user_threshold_man
+
+    def test_pyramid_includes_finer_top_end_thresholds(self):
+        """ユーザー要望: 4000万円以上・5000万円以上といった上位区分も見えるようにする"""
+        r = compute_wealth_percentile(45, 1500)
+        thresholds = [row["threshold_man"] for row in r.pyramid]
+        assert 4000 in thresholds
+        assert 5000 in thresholds
 
     def test_all_age_bands_produce_valid_result(self):
         """全年代でクラッシュせず妥当な範囲の値を返す（回帰テスト）"""
