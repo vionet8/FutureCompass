@@ -45,12 +45,17 @@ def _parse_ai_json(text: str) -> list[dict]:
     return json.loads(cleaned)
 
 
-def request_ai_suggestions(transactions: list[dict]) -> list[dict]:
+def request_ai_suggestions(transactions: list[dict], user_context: str | None = None) -> list[dict]:
     """
     取引リストをAIに送り、振替漏れ・分類誤りの疑いがある取引の修正案を返す。
     戻り値: [{transaction_id, issue, suggested_category_major, suggested_category_minor,
               suggested_is_transfer, reasoning}, ...]
     AI呼び出し失敗時は例外を投げず空リストを返す（家計分析全体を壊さないため）。
+
+    user_context: 取引データだけでは読み取れない、ユーザー固有の資金の流れに関する
+      補足情報（例:「楽天ペイの残高は楽天証券への投資資金として使うことがある」）。
+      これが無いと、例えば楽天ペイ経由の支払いが投資向けなのか純粋な生活費なのか
+      AIには判断のしようがない。
     """
     batch = transactions[-MAX_TRANSACTIONS_PER_REVIEW:]
     payload = _build_review_payload(batch)
@@ -58,6 +63,11 @@ def request_ai_suggestions(transactions: list[dict]) -> list[dict]:
         return []
 
     payload_text = json.dumps(payload, ensure_ascii=False, indent=2)
+    context_block = (
+        f"\n【ユーザーからの補足情報（資金の流れについて）】\n{user_context}\n"
+        if user_context and user_context.strip()
+        else ""
+    )
 
     prompt = f"""あなたは家計簿データのクレンジングを支援するアシスタントです。
 以下はマネーフォワードから取り込んだ取引データです。自動分類が誤っている可能性がある
@@ -66,7 +76,7 @@ def request_ai_suggestions(transactions: list[dict]) -> list[dict]:
 1. 振替漏れの疑い: 証券会社・銀行間の資金移動（投資信託の買付、口座間振替など）に見えるのに
    is_transferがfalseになっている取引。これらは家計の収支に混ざると実態と乖離する。
 2. 分類誤りの疑い: descriptionの内容とcategory_major/category_minorが明らかに合っていない取引。
-
+{context_block}
 【取引データ】
 {payload_text}
 

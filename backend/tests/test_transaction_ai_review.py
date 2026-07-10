@@ -105,3 +105,26 @@ class TestRequestAiSuggestions:
             prompt = call_args.kwargs["messages"][0]["content"]
             # 送信件数がMAX以下に収まっていること（プロンプト内のtransaction_id出現回数で確認）
             assert prompt.count('"id":') <= MAX_TRANSACTIONS_PER_REVIEW
+
+    def test_user_context_included_in_prompt(self):
+        """ユーザーが設定した資金フローのヒントがプロンプトに含まれる（例:楽天ペイの投資使途）"""
+        with patch("backend.services.transaction_ai_review.client") as mock_client:
+            mock_client.messages.create.return_value = _mock_response("[]")
+            request_ai_suggestions([make_txn()], user_context="楽天ペイの残高は楽天証券への投資資金として使うことがある")
+            prompt = mock_client.messages.create.call_args.kwargs["messages"][0]["content"]
+            assert "楽天ペイの残高は楽天証券への投資資金として使うことがある" in prompt
+
+    def test_no_user_context_omits_context_block(self):
+        """ヒント未設定時はプロンプトに補足情報セクションが含まれない"""
+        with patch("backend.services.transaction_ai_review.client") as mock_client:
+            mock_client.messages.create.return_value = _mock_response("[]")
+            request_ai_suggestions([make_txn()], user_context=None)
+            prompt = mock_client.messages.create.call_args.kwargs["messages"][0]["content"]
+            assert "ユーザーからの補足情報" not in prompt
+
+    def test_blank_user_context_omits_context_block(self):
+        with patch("backend.services.transaction_ai_review.client") as mock_client:
+            mock_client.messages.create.return_value = _mock_response("[]")
+            request_ai_suggestions([make_txn()], user_context="   ")
+            prompt = mock_client.messages.create.call_args.kwargs["messages"][0]["content"]
+            assert "ユーザーからの補足情報" not in prompt

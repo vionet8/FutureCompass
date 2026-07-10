@@ -42,6 +42,11 @@ class UserProfile(Base):
     # 子供の教育方針
     education_type = Column(String, default="public")  # public|private_middle|private_high|private
 
+    # 家計取引AIレビュー向けの資金フローに関する自由記述ヒント
+    # （例:「楽天ペイの残高は楽天証券への投資資金として使うことがある」）。
+    # 取引データだけでは読み取れない、ユーザー固有の資金の流れをAIに伝えるため。
+    household_ai_context = Column(String, nullable=True)
+
     user = relationship("User", back_populates="profile")
 
 

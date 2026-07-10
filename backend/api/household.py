@@ -385,6 +385,40 @@ def delete_rule_endpoint(
     return {"deleted": True}
 
 
+class AiContextInput(BaseModel):
+    context: str
+
+
+@router.get("/ai-context")
+def get_ai_context(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """AI取引レビューに渡す、資金の流れに関する補足ヒント（例:楽天ペイの使途）を返す"""
+    profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+    return {"context": profile.household_ai_context if profile else None}
+
+
+@router.put("/ai-context")
+def put_ai_context(
+    body: AiContextInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    AI取引レビュー用のヒントを保存する。
+    取引データ単体では「楽天ペイが投資資金にも使われる」等の実態は読み取れないため、
+    このヒントを渡さないと振替漏れ判定の精度が上がらない。
+    """
+    profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+    if not profile:
+        profile = UserProfile(user_id=current_user.id)
+        db.add(profile)
+    profile.household_ai_context = body.context
+    db.commit()
+    return {"context": profile.household_ai_context}
+
+
 @router.post("/ai-review")
 def post_ai_review(
     db: Session = Depends(get_db),
@@ -399,7 +433,10 @@ def post_ai_review(
     if not transactions:
         return {"has_data": False, "message": "取引データがありません。先にCSVを取り込んでください。"}
 
-    suggestions = request_ai_suggestions(transactions)
+    profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+    user_context = profile.household_ai_context if profile else None
+
+    suggestions = request_ai_suggestions(transactions, user_context=user_context)
 
     txn_by_id = {t["id"]: t for t in transactions}
     enriched = []
