@@ -2521,6 +2521,26 @@ async function loadWealthPercentile() {
         onclick="selectWealthAgeBand('${b}')">${b}${b === r.actual_age_band ? '（実年齢）' : ''}</button>
     `).join('');
 
+    // ピラミッド表示: 資産が多い区分ほど上に、世帯割合(pct)が幅に反映される中央揃えの横棒
+    const maxPct = Math.max(...r.distribution.map(d => d.pct), 1);
+    const pyramidRows = [...r.distribution].reverse().map(d => {
+      const widthPct = Math.max(4, (d.pct / maxPct) * 100); // 最低幅を確保して極小区分も見えるように
+      const barColor = d.is_user_bucket ? 'var(--accent)' : 'rgba(139,144,167,.35)';
+      const labelColor = d.is_user_bucket ? 'var(--text)' : 'var(--text2)';
+      return `
+        <div style="display:flex;align-items:center;gap:10px;padding:3px 0;">
+          <div style="width:110px;flex-shrink:0;text-align:right;font-size:.76rem;color:${labelColor};font-weight:${d.is_user_bucket ? '700' : '400'};">
+            ${d.is_user_bucket ? '👉 ' : ''}${d.label}
+          </div>
+          <div style="flex:1;display:flex;justify-content:center;">
+            <div style="width:${widthPct}%;min-width:24px;height:26px;background:${barColor};border-radius:4px;display:flex;align-items:center;justify-content:center;transition:width .3s;">
+              <span style="font-size:.72rem;color:${d.is_user_bucket ? '#fff' : 'var(--text2)'};font-weight:${d.is_user_bucket ? '700' : '400'};">${d.pct}%</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
     const body = document.getElementById('wealthPercentileBody');
     body.innerHTML = `
       <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:16px;">${tabs}</div>
@@ -2528,30 +2548,9 @@ async function loadWealthPercentile() {
         <div style="font-size:.85rem;color:var(--text2);margin-bottom:6px;">${r.age_band}のあなたは総資産${r.total_assets_man.toLocaleString()}万円 —</div>
         <div style="font-size:2.2rem;font-weight:800;color:var(--accent2);">上位 ${r.top_percent}%</div>
       </div>
-      <canvas id="wealthPercentileChart" style="max-height:220px;"></canvas>
-      <div style="font-size:.72rem;color:var(--text2);margin-top:10px;">出典: ${r.source}（区分別の統計から線形補間した概算値であり、正確な順位ではありません）</div>
+      <div style="max-width:480px;margin:0 auto;">${pyramidRows}</div>
+      <div style="font-size:.72rem;color:var(--text2);margin-top:14px;text-align:center;">出典: ${r.source}（区分別の統計から線形補間した概算値であり、正確な順位ではありません）</div>
     `;
-
-    destroyChart('wealthPercentileChart');
-    chartInsts['wealthPercentileChart'] = new Chart(document.getElementById('wealthPercentileChart'), {
-      type: 'bar',
-      data: {
-        labels: r.distribution.map(d => d.label),
-        datasets: [{
-          data: r.distribution.map(d => d.pct),
-          backgroundColor: r.distribution.map(d => d.is_user_bucket ? '#6c63ff' : 'rgba(139,144,167,.35)'),
-          borderRadius: 4,
-        }],
-      },
-      options: {
-        responsive: true,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { ticks: { color: '#8b90a7', font: { size: 10 } }, grid: { display: false } },
-          y: { ticks: { color: '#8b90a7', callback: v => v + '%' }, grid: { color: '#2e3248' } },
-        },
-      },
-    });
   } catch (e) {
     card.style.display = 'none';
   }
