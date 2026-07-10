@@ -25,7 +25,9 @@ TIME_HORIZON_AXIS_KEY = "time_horizon"
 TIME_HORIZON_VALUES = ["長期", "中期", "短期（1年以内）"]
 
 CYCLICALITY_AXIS_KEY = "cyclicality"
-CYCLICALITY_VALUES = ["景気敏感", "ディフェンシブ"]
+# 「対象外」は自動分類の既定値「未分類」（＝まだ判断していない）とは意味が違う。
+# ポイント等、ユーザーが「この軸はそもそも当てはまらない」と意図的に判断した場合に使う。
+CYCLICALITY_VALUES = ["景気敏感", "ディフェンシブ", "対象外"]
 
 # 日本個別株：証券コード → (資産クラス, 商品タイプ)。通貨は常にJPY。
 # 商品タイプはGICS類似の大分類（金融・情報技術・資本財等）にまとめる。

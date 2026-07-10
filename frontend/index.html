@@ -2947,14 +2947,30 @@ async function loadPortfolioSecurities() {
       const subtotal = items.reduce((sum, s) => sum + s.market_value_yen, 0);
       const activeSubtotal = items.filter(s => !s.excluded).reduce((sum, s) => sum + s.market_value_yen, 0);
 
+      const axisOptions = portfolioAxes.map(a => `<option value="${a.key}">${a.label}</option>`).join('');
+      const catId = `cat-${cat}`;
+
       return `
         <div style="border:1px solid var(--border);border-radius:10px;margin-bottom:14px;overflow:hidden;">
-          <div style="background:var(--bg3);padding:8px 12px;font-size:.85rem;font-weight:600;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-            <span>${cat}</span>
-            <div style="display:flex;align-items:center;gap:10px;">
-              <span style="color:var(--text2);font-weight:400;">${items.length}件　${activeSubtotal !== subtotal ? `<s style="opacity:.6;">${(subtotal / 10000).toFixed(1)}万円</s> ` : ''}${(activeSubtotal / 10000).toFixed(1)}万円</span>
+          <div style="background:var(--bg3);padding:8px 12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;font-size:.85rem;font-weight:600;">
+              <span>${cat}</span>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span style="color:var(--text2);font-weight:400;">${items.length}件　${activeSubtotal !== subtotal ? `<s style="opacity:.6;">${(subtotal / 10000).toFixed(1)}万円</s> ` : ''}${(activeSubtotal / 10000).toFixed(1)}万円</span>
+                <button class="btn-secondary" style="padding:3px 10px;border-radius:6px;font-size:.72rem;"
+                  onclick="bulkExcludeCategory('${cat}', ${!allExcluded})">${allExcluded ? 'すべて対象に戻す' : 'このカテゴリを計算対象外にする'}</button>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap;">
+              <span style="font-size:.72rem;color:var(--text2);">一括設定:</span>
+              <select id="bulkAxis-${catId}" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:.75rem;"
+                onchange="updatePortfolioBulkValueField('${cat}')">
+                <option value="">軸を選択</option>
+                ${axisOptions}
+              </select>
+              <span id="bulkValueWrap-${catId}"></span>
               <button class="btn-secondary" style="padding:3px 10px;border-radius:6px;font-size:.72rem;"
-                onclick="bulkExcludeCategory('${cat}', ${!allExcluded})">${allExcluded ? 'すべて対象に戻す' : 'このカテゴリを計算対象外にする'}</button>
+                onclick="applyPortfolioBulkTag('${cat}')">このカテゴリ全部に適用</button>
             </div>
           </div>
           <table style="width:100%;border-collapse:collapse;font-size:.85rem;">
@@ -3000,6 +3016,43 @@ async function updateSecurityExclusion(securityKey, excluded) {
 async function bulkExcludeCategory(category, excluded) {
   try {
     await api('PUT', `/portfolio/categories/${encodeURIComponent(category)}/exclude`, { excluded });
+    loadPortfolioBreakdown();
+    loadWalletBuckets();
+    loadPortfolioSecurities();
+  } catch (e) {
+    alert('一括設定に失敗しました: ' + e.message);
+  }
+}
+
+function updatePortfolioBulkValueField(category) {
+  const catId = `cat-${category}`;
+  const axisKey = document.getElementById(`bulkAxis-${catId}`).value;
+  const wrap = document.getElementById(`bulkValueWrap-${catId}`);
+  const options = PORTFOLIO_SELECT_OPTIONS[axisKey];
+  if (!axisKey) {
+    wrap.innerHTML = '';
+  } else if (options) {
+    wrap.innerHTML = `<select id="bulkValue-${catId}" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:.75rem;">
+      ${options.map(v => `<option value="${v}">${v}</option>`).join('')}
+    </select>`;
+  } else {
+    wrap.innerHTML = `<input type="text" id="bulkValue-${catId}" placeholder="設定する値"
+      style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:.75rem;width:140px;">`;
+  }
+}
+
+async function applyPortfolioBulkTag(category) {
+  const catId = `cat-${category}`;
+  const axisKey = document.getElementById(`bulkAxis-${catId}`).value;
+  const valueEl = document.getElementById(`bulkValue-${catId}`);
+  if (!axisKey || !valueEl || !valueEl.value.trim()) {
+    alert('軸と設定値を選択してください');
+    return;
+  }
+  try {
+    const r = await api('PUT', `/portfolio/categories/${encodeURIComponent(category)}/tags`, {
+      axis_key: axisKey, value: valueEl.value,
+    });
     loadPortfolioBreakdown();
     loadWalletBuckets();
     loadPortfolioSecurities();

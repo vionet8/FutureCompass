@@ -15,6 +15,7 @@ from backend.services.classification import (
 from backend.services.portfolio_analysis import (
     set_security_excluded,
     set_category_excluded,
+    bulk_set_category_tag,
     compute_breakdown,
     list_securities_with_tags,
 )
@@ -252,3 +253,56 @@ class TestCategoryExclusion:
         securities = list_securities_with_tags(db, "u1")
         points = [s for s in securities if s["category"] == "ポイント"]
         assert all(not s["excluded"] for s in points)
+
+
+class TestBulkSetCategoryTag:
+    def test_sets_tag_for_all_securities_in_category(self, db):
+        """例: 株式の資金の時間軸を一括で「中期」にする"""
+        import_portfolio_paste(db, "u1", SAMPLE_PASTE_FOR_EXCLUSION)
+        ensure_builtin_axes(db, "u1")
+        count = bulk_set_category_tag(db, "u1", "株式", "time_horizon", "中期")
+        assert count == 1  # SAMPLE_PASTE_FOR_EXCLUSIONの株式は8306の1件のみ
+
+        securities = list_securities_with_tags(db, "u1")
+        stock = next(s for s in securities if s["security_key"] == "株式:8306")
+        assert stock["tags"]["time_horizon"] == "中期"
+
+    def test_bulk_set_marks_as_manual_not_auto(self, db):
+        """一括設定はis_auto=0になり、以後の自動分類・再インポートで上書きされない"""
+        import_portfolio_paste(db, "u1", SAMPLE_PASTE_FOR_EXCLUSION)
+        axes = ensure_builtin_axes(db, "u1")
+        bulk_set_category_tag(db, "u1", "株式", "time_horizon", "中期")
+
+        tag = db.query(SecurityTag).filter(
+            SecurityTag.security_key == "株式:8306", SecurityTag.axis_id == axes["time_horizon"].id
+        ).first()
+        assert tag.is_auto == 0
+
+    def test_bulk_set_only_affects_specified_category(self, db):
+        import_portfolio_paste(db, "u1", SAMPLE_PASTE_FOR_EXCLUSION)
+        ensure_builtin_axes(db, "u1")
+        bulk_set_category_tag(db, "u1", "ポイント", "cyclicality", "対象外")
+
+        securities = list_securities_with_tags(db, "u1")
+        stock = next(s for s in securities if s["security_key"] == "株式:8306")
+        assert stock["tags"].get("cyclicality") != "対象外"
+
+    def test_bulk_set_overwrites_existing_tag(self, db):
+        """既にタグがある銘柄でも一括設定で値が上書きされる"""
+        import_portfolio_paste(db, "u1", SAMPLE_PASTE_FOR_EXCLUSION)
+        ensure_builtin_axes(db, "u1")
+        bulk_set_category_tag(db, "u1", "株式", "time_horizon", "中期")
+        bulk_set_category_tag(db, "u1", "株式", "time_horizon", "短期（1年以内）")
+
+        securities = list_securities_with_tags(db, "u1")
+        stock = next(s for s in securities if s["security_key"] == "株式:8306")
+        assert stock["tags"]["time_horizon"] == "短期（1年以内）"
+
+    def test_unknown_axis_returns_none(self, db):
+        import_portfolio_paste(db, "u1", SAMPLE_PASTE_FOR_EXCLUSION)
+        result = bulk_set_category_tag(db, "u1", "株式", "nonexistent_axis", "何か")
+        assert result is None
+
+    def test_no_snapshot_returns_none(self, db):
+        result = bulk_set_category_tag(db, "u1", "株式", "time_horizon", "中期")
+        assert result is None

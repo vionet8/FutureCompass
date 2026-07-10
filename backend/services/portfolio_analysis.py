@@ -149,3 +149,43 @@ def set_category_excluded(db: Session, user_id: str, category: str, excluded: bo
     for key in security_keys:
         set_security_excluded(db, user_id, key, excluded)
     return len(security_keys)
+
+
+def bulk_set_category_tag(db: Session, user_id: str, category: str, axis_key: str, value: str) -> int:
+    """
+    最新スナップショットのうち指定カテゴリに属する銘柄すべてに、指定軸のタグを
+    一括設定する（例:「株式」の資金の時間軸を全部「中期」にする）。
+    手動での一括操作なのでis_auto=0にし、以後の自動分類・再インポートで
+    上書きされないようにする。軸が存在しない場合はNoneを返す。
+    """
+    snapshot = get_latest_snapshot(db, user_id)
+    if snapshot is None:
+        return None
+
+    axis = (
+        db.query(ClassificationAxis)
+        .filter(ClassificationAxis.user_id == user_id, ClassificationAxis.key == axis_key)
+        .first()
+    )
+    if axis is None:
+        return None
+
+    security_keys = {
+        h.security_key for h in db.query(Holding)
+        .filter(Holding.snapshot_id == snapshot.id, Holding.category == category).all()
+    }
+
+    existing_tags = {
+        t.security_key: t for t in db.query(SecurityTag)
+        .filter(SecurityTag.user_id == user_id, SecurityTag.axis_id == axis.id,
+                SecurityTag.security_key.in_(security_keys)).all()
+    }
+    for key in security_keys:
+        tag = existing_tags.get(key)
+        if tag:
+            tag.value = value
+            tag.is_auto = 0
+        else:
+            db.add(SecurityTag(user_id=user_id, security_key=key, axis_id=axis.id, value=value, is_auto=0))
+    db.commit()
+    return len(security_keys)

@@ -11,6 +11,7 @@ from ..services.portfolio_analysis import (
     list_securities_with_tags,
     set_security_excluded,
     set_category_excluded,
+    bulk_set_category_tag,
 )
 from ..services.classification import ensure_builtin_axes, TIME_HORIZON_VALUES
 from ..services.wealth_bucket import get_bucket_summary, set_bucket_goal
@@ -230,3 +231,20 @@ def put_category_exclusion(
     """指定カテゴリ（現金/株式/投資信託/年金/ポイント）に属する銘柄を一括で計算対象外にする・戻す"""
     count = set_category_excluded(db, current_user.id, category, body.excluded)
     return {"category": category, "excluded": body.excluded, "affected_count": count}
+
+
+@router.put("/categories/{category}/tags")
+def put_category_tag(
+    category: str,
+    body: SetTagInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    指定カテゴリに属する銘柄すべてに、指定軸のタグを一括設定する
+    （例:「株式」の資金の時間軸を一括で「中期」にする）
+    """
+    count = bulk_set_category_tag(db, current_user.id, category, body.axis_key, body.value)
+    if count is None:
+        raise HTTPException(status_code=404, detail="指定された軸、または保有資産データが見つかりません")
+    return {"category": category, "axis_key": body.axis_key, "value": body.value, "affected_count": count}
