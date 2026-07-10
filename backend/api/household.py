@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from ..core.database import get_db
 from ..models.mf_transaction import MFTransaction
 from ..models.profile import UserProfile
+from ..models.performance import CashFlowEvent
 from ..models.user import User
 from ..services.mf_analyzer import (
     parse_mf_csv,
@@ -15,6 +16,7 @@ from ..services.mf_analyzer import (
     compare_yoy,
     detect_trend,
     build_ai_analysis_payload,
+    compute_disposable_budget,
 )
 from ..services.mf_import import (
     import_file_content,
@@ -148,6 +150,38 @@ def _load_transactions(user_id: str, db: Session, apply_corrections: bool = True
     return apply_rules_and_overrides(transactions, rules)
 
 
+def _monthly_investment_inflow_yen(db: Session, user_id: str, year: int, month: int) -> int:
+    """
+    指定月に証券口座等へ入金された額の合計（CashFlowEvent、楽天CSV取込や手動記録由来）。
+    取引単位の振替判定に頼らず、実際に投資に回った金額を直接集計する。
+    """
+    rows = (
+        db.query(CashFlowEvent)
+        .filter(
+            CashFlowEvent.user_id == user_id,
+            extract("year", CashFlowEvent.flow_date) == year,
+            extract("month", CashFlowEvent.flow_date) == month,
+            CashFlowEvent.amount_yen > 0,
+        )
+        .all()
+    )
+    return sum(r.amount_yen for r in rows)
+
+
+def _summary_with_budget(transactions: list[dict], db: Session, user_id: str, year: int, month: int) -> dict:
+    """
+    月次サマリーに、取引単位の振替分類に頼らない資金フローベースの可処分所得・
+    黒字/赤字判定を付加する（楽天ペイ等、資金源が入り組んで振替判定しきれない
+    取引があっても、証券口座への実入金額を既知の固定値として使うことで成り立つ）。
+    """
+    summary = monthly_summary(transactions, year, month)
+    investment_inflow_yen = _monthly_investment_inflow_yen(db, user_id, year, month)
+    summary.update(compute_disposable_budget(
+        summary["total_income_yen"], summary["total_expense_yen"], investment_inflow_yen,
+    ))
+    return summary
+
+
 @router.get("/summary/{year}/{month}")
 def get_monthly_summary(
     year: int,
@@ -155,10 +189,9 @@ def get_monthly_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """指定月のカテゴリ別支出サマリー"""
+    """指定月のカテゴリ別支出サマリー（可処分所得・余剰消費を含む）"""
     transactions = _load_transactions(current_user.id, db)
-    summary = monthly_summary(transactions, year, month)
-    return summary
+    return _summary_with_budget(transactions, db, current_user.id, year, month)
 
 
 @router.get("/compare/{year}/{month}")
@@ -172,7 +205,7 @@ def get_yoy_comparison(
     """当月 vs 前年同月の比較。threshold=0.10 → ±10%以上でフラグ"""
     transactions = _load_transactions(current_user.id, db)
 
-    current = monthly_summary(transactions, year, month)
+    current = _summary_with_budget(transactions, db, current_user.id, year, month)
     prev_year_val = year - 1
     prev = monthly_summary(transactions, prev_year_val, month)
 

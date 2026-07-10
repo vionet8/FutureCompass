@@ -903,6 +903,9 @@
   <div id="hhSummaryCards" style="display:none">
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px;" id="hhKpiCards"></div>
 
+    <!-- 可処分所得カード -->
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:20px;" id="hhBudgetCard"></div>
+
     <!-- カテゴリ別支出チャート -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
       <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;">
@@ -2357,6 +2360,31 @@ function renderHouseholdSummary(data, year, month) {
       <div style="font-size:1.5rem;font-weight:700;color:${balColor}">${balance >= 0 ? '+' : ''}${fmtYen(balance)}</div>
       <div style="font-size:.78rem;color:var(--text2);margin-top:4px;">${flagged.length > 0 ? `⚠️ 前年比変化 ${flagged.length}項目` : '前年比異常なし'}</div>
     </div>`;
+
+  // 可処分所得カード（資金フローベース。投資への実入金額を収入から除いた残りと実支出を比較）
+  const surplusColor = cur.surplus_yen >= 0 ? 'var(--accent2)' : 'var(--warn)';
+  const surplusLabel = cur.surplus_yen >= 0 ? '黒字' : '余剰消費（使いすぎ）';
+  document.getElementById('hhBudgetCard').innerHTML = `
+    <div style="font-weight:600;margin-bottom:4px;">💰 可処分所得ベースの黒字/赤字</div>
+    <div style="font-size:.78rem;color:var(--text2);margin-bottom:14px;line-height:1.6;">
+      収入から証券口座への実入金額（今月 ${fmtYen(cur.investment_inflow_yen)}）を引いた「可処分所得」と実支出を比較。
+      楽天ペイ等、取引単位で振替判定しきれない支出があっても、この方式なら影響を受けません。
+    </div>
+    <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:baseline;">
+      <div>
+        <div style="font-size:.75rem;color:var(--text2);">可処分所得（収入-投資）</div>
+        <div style="font-size:1.1rem;font-weight:600;">${fmtYen(cur.disposable_income_yen)}</div>
+      </div>
+      <div>
+        <div style="font-size:.75rem;color:var(--text2);">実支出</div>
+        <div style="font-size:1.1rem;font-weight:600;">${fmtYen(cur.total_expense_yen)}</div>
+      </div>
+      <div>
+        <div style="font-size:.75rem;color:var(--text2);">${surplusLabel}</div>
+        <div style="font-size:1.3rem;font-weight:700;color:${surplusColor}">${cur.surplus_yen >= 0 ? '+' : ''}${fmtYen(cur.surplus_yen)}</div>
+      </div>
+    </div>
+  `;
 
   // カテゴリチャートサブタイトル
   document.getElementById('hhChartSub').textContent =

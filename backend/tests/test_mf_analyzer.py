@@ -9,6 +9,7 @@ from backend.services.mf_analyzer import (
     compare_yoy,
     detect_trend,
     build_ai_analysis_payload,
+    compute_disposable_budget,
 )
 
 
@@ -274,3 +275,37 @@ class TestAiPayload:
         assert "institution" not in text
         assert "description" not in text
         assert payload["支出合計_円"] == 300000
+
+
+# ──────────────────────────────────────────────
+# 可処分所得・余剰消費（資金フローベースの黒字/赤字判定）
+# ──────────────────────────────────────────────
+
+class TestComputeDisposableBudget:
+    def test_surplus_when_spending_within_disposable_income(self):
+        """収入30万・投資10万・支出15万 → 可処分所得20万に対し支出15万なので黒字5万"""
+        r = compute_disposable_budget(total_income_yen=300_000, total_expense_yen=150_000, investment_inflow_yen=100_000)
+        assert r["investment_inflow_yen"] == 100_000
+        assert r["disposable_income_yen"] == 200_000
+        assert r["surplus_yen"] == 50_000
+
+    def test_deficit_when_spending_exceeds_disposable_income(self):
+        """
+        楽天ペイ等で振替判定しきれない支出が生活費に混ざり、可処分所得を
+        超えて計上されるケース: 収入30万・投資10万・支出25万 → 余剰消費(赤字)5万
+        """
+        r = compute_disposable_budget(total_income_yen=300_000, total_expense_yen=250_000, investment_inflow_yen=100_000)
+        assert r["disposable_income_yen"] == 200_000
+        assert r["surplus_yen"] == -50_000
+
+    def test_zero_investment_inflow_falls_back_to_plain_surplus(self):
+        """投資データが無い月は投資額0円として扱われ、単純な収入-支出になる"""
+        r = compute_disposable_budget(total_income_yen=300_000, total_expense_yen=250_000, investment_inflow_yen=0)
+        assert r["disposable_income_yen"] == 300_000
+        assert r["surplus_yen"] == 50_000
+
+    def test_investment_inflow_exceeding_income_gives_negative_disposable_income(self):
+        """ボーナス月に一時的な大口投資をした場合など、可処分所得がマイナスになりうる"""
+        r = compute_disposable_budget(total_income_yen=300_000, total_expense_yen=50_000, investment_inflow_yen=400_000)
+        assert r["disposable_income_yen"] == -100_000
+        assert r["surplus_yen"] == -150_000

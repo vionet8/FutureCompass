@@ -153,6 +153,27 @@ def monthly_summary(transactions: list[dict], year: int, month: int) -> dict:
     }
 
 
+def compute_disposable_budget(
+    total_income_yen: int, total_expense_yen: int, investment_inflow_yen: int,
+) -> dict:
+    """
+    収支の取引分類が完璧でなくても成り立つ、資金フローベースの黒字/赤字判定。
+    楽天ペイのように資金源が入り組んでいて取引単位で振替判定しきれないケースがあるため、
+    「証券口座への月次入金額」を既知の固定値として収入から差し引き、
+    残り（可処分所得）と実支出を比較する。
+
+    disposable_income_yen = 収入 - 投資への入金額（投資分は生活費の対象外として除外）
+    surplus_yen = 可処分所得 - 実支出（プラス=黒字、マイナス=可処分所得を超える「余剰消費」）
+    """
+    disposable_income_yen = total_income_yen - investment_inflow_yen
+    surplus_yen = disposable_income_yen - total_expense_yen
+    return {
+        "investment_inflow_yen": investment_inflow_yen,
+        "disposable_income_yen": disposable_income_yen,
+        "surplus_yen": surplus_yen,
+    }
+
+
 def compare_yoy(
     current: dict,
     prev_year: dict,
