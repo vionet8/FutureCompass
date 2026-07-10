@@ -1002,7 +1002,7 @@
 <!-- PORTFOLIO PAGE -->
 <div class="page" id="page-portfolio">
   <div class="section-title">📦 保有資産の内訳</div>
-  <p style="color:var(--text2);margin-bottom:20px;font-size:.9rem;">マネーフォワード ME の「保有資産」ページ（<code>moneyforward.com/bs/portfolio</code>）全体を選択してコピーし、下に貼り付けてください。通貨・資産クラス・商品タイプの3軸で自動分類し、円グラフで内訳を表示します。</p>
+  <p style="color:var(--text2);margin-bottom:20px;font-size:.9rem;">マネーフォワード ME の「保有資産」ページ（<code>moneyforward.com/bs/portfolio</code>）全体を選択してコピーし、下に貼り付けてください。通貨・資産クラス・商品タイプ・資金の時間軸の4軸で自動分類し、円グラフや3つの財布で内訳を表示します。</p>
 
   <!-- 貼り付けフォーム -->
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;">
@@ -1014,6 +1014,13 @@
       style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:12px;border-radius:8px;font-size:.82rem;font-family:monospace;resize:vertical;"></textarea>
     <button class="btn-primary" style="margin-top:10px;padding:10px 20px;border-radius:8px;" onclick="submitPortfolioPaste()">取り込む</button>
     <div id="portfolioPasteResult" style="margin-top:12px;"></div>
+  </div>
+
+  <!-- 3つの財布 -->
+  <div id="walletBucketsCard" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;display:none;">
+    <div style="font-size:1rem;font-weight:600;margin-bottom:4px;">👛 3つの財布（資金の時間軸）</div>
+    <div style="font-size:.78rem;color:var(--text2);margin-bottom:16px;line-height:1.6;">長期＝絶対に動かさない資金／中期＝数年内に使う可能性がある資金／短期＝1年以内に使う資金。銘柄ごとの分類は下の「銘柄タグの確認・修正」で変更できます。</div>
+    <div id="walletBucketsBody" style="display:flex;flex-direction:column;gap:14px;"></div>
   </div>
 
   <!-- 内訳グラフ -->
@@ -2588,6 +2595,7 @@ async function initPortfolioPage() {
   await loadPortfolioAxes();
   loadPortfolioBreakdown();
   loadPortfolioSecurities();
+  loadWalletBuckets();
 }
 
 async function submitPortfolioPaste() {
@@ -2672,15 +2680,29 @@ async function loadPortfolioSecurities() {
     if (!securities.length) { card.style.display = 'none'; return; }
     card.style.display = 'block';
 
+    const TIME_HORIZON_OPTIONS = ['長期', '中期', '短期（1年以内）'];
     const axisCols = portfolioAxes.map(a => `<th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);color:var(--text2);font-size:.78rem;">${a.label}</th>`).join('');
     const rows = securities.map(s => {
-      const cells = portfolioAxes.map(a => `
-        <td style="padding:6px 10px;border-bottom:1px solid var(--border);">
-          <input type="text" value="${(s.tags[a.key] || '').replace(/"/g, '&quot;')}"
-            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:.8rem;width:120px;"
-            onchange="updateSecurityTag('${s.security_key}', '${a.key}', this.value)">
-        </td>
-      `).join('');
+      const cells = portfolioAxes.map(a => {
+        const current = s.tags[a.key] || '';
+        if (a.key === 'time_horizon') {
+          const opts = ['<option value="">未設定</option>', ...TIME_HORIZON_OPTIONS.map(v =>
+            `<option value="${v}" ${v === current ? 'selected' : ''}>${v}</option>`)].join('');
+          return `
+            <td style="padding:6px 10px;border-bottom:1px solid var(--border);">
+              <select style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:.8rem;width:130px;"
+                onchange="updateSecurityTag('${s.security_key}', '${a.key}', this.value)">${opts}</select>
+            </td>
+          `;
+        }
+        return `
+          <td style="padding:6px 10px;border-bottom:1px solid var(--border);">
+            <input type="text" value="${current.replace(/"/g, '&quot;')}"
+              style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:.8rem;width:120px;"
+              onchange="updateSecurityTag('${s.security_key}', '${a.key}', this.value)">
+          </td>
+        `;
+      }).join('');
       return `<tr>
         <td style="padding:6px 10px;border-bottom:1px solid var(--border);">${s.name}</td>
         <td style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right;">${Math.round(s.market_value_yen / 10000).toLocaleString()}万円</td>
@@ -2706,8 +2728,65 @@ async function updateSecurityTag(securityKey, axisKey, value) {
   try {
     await api('PUT', `/portfolio/securities/${encodeURIComponent(securityKey)}/tags`, { axis_key: axisKey, value });
     loadPortfolioBreakdown();
+    if (axisKey === 'time_horizon') loadWalletBuckets();
   } catch (e) {
     alert('タグの更新に失敗しました: ' + e.message);
+  }
+}
+
+async function loadWalletBuckets() {
+  const card = document.getElementById('walletBucketsCard');
+  try {
+    const r = await api('GET', '/portfolio/buckets');
+    if (!r.has_data) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+
+    const rows = r.buckets.map(b => {
+      const currentMan = Math.round(b.current_amount_yen / 10000);
+      const targetMan = b.target_amount_yen !== null ? Math.round(b.target_amount_yen / 10000) : '';
+      const pct = b.achievement_pct;
+      const barPct = pct === null ? 0 : Math.min(100, pct);
+      const barColor = pct === null ? 'rgba(139,144,167,.35)' : (pct >= 100 ? 'var(--accent2)' : 'var(--accent)');
+      return `
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
+            <div style="font-weight:600;">${b.bucket_value}</div>
+            <div style="font-size:.85rem;color:var(--text2);">
+              現在 <strong style="color:var(--text)">${currentMan.toLocaleString()}万円</strong>
+              　目標
+              <input type="number" value="${targetMan}" placeholder="未設定" min="0"
+                style="width:90px;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:.85rem;"
+                onchange="updateBucketGoal('${b.bucket_value}', this.value)">万円
+              ${pct !== null ? `　<strong style="color:${pct >= 100 ? 'var(--accent2)' : 'var(--text)'}">${pct}%</strong>` : ''}
+            </div>
+          </div>
+          <div style="height:12px;background:var(--bg3);border-radius:6px;overflow:hidden;">
+            <div style="height:100%;width:${barPct}%;background:${barColor};transition:width .3s;"></div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const unclassifiedNote = r.unclassified_yen > 0
+      ? `<div style="font-size:.75rem;color:var(--text2);margin-top:12px;">※ 未分類（資金の時間軸タグ未設定）: ${Math.round(r.unclassified_yen / 10000).toLocaleString()}万円。下の「銘柄タグの確認・修正」で分類してください。</div>`
+      : '';
+
+    document.getElementById('walletBucketsBody').innerHTML = rows + unclassifiedNote;
+  } catch (e) {
+    card.style.display = 'none';
+  }
+}
+
+async function updateBucketGoal(bucketValue, value) {
+  const targetManStr = value.trim();
+  if (!targetManStr) return;
+  const targetMan = parseInt(targetManStr, 10);
+  if (isNaN(targetMan) || targetMan < 0) return;
+  try {
+    await api('PUT', `/portfolio/buckets/${encodeURIComponent(bucketValue)}/goal`, { target_amount_man: targetMan });
+    loadWalletBuckets();
+  } catch (e) {
+    alert('目標金額の更新に失敗しました: ' + e.message);
   }
 }
 </script>

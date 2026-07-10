@@ -8,6 +8,7 @@ from backend.models.user import User
 from backend.models.portfolio import PortfolioSnapshot, Holding, SecurityTag
 from backend.services.portfolio_import import import_portfolio_paste, PortfolioParseError
 from backend.services.portfolio_analysis import compute_breakdown, list_securities_with_tags
+from backend.services.classification import BUILTIN_AXES
 
 SAMPLE_PASTE = """預金・現金
 合計：110,000円
@@ -75,7 +76,7 @@ class TestImportPortfolioPaste:
     def test_creates_auto_tags(self, db):
         import_portfolio_paste(db, "u1", SAMPLE_PASTE)
         tags = db.query(SecurityTag).filter(SecurityTag.security_key == "投資信託:SBI・iシェアーズ・ゴールドファンド(為替ヘッジなし)").all()
-        assert len(tags) == 3
+        assert len(tags) == len(BUILTIN_AXES)
         assert all(t.is_auto == 1 for t in tags)
 
     def test_repeated_paste_creates_new_snapshot_without_duplicating_tags(self, db):
@@ -85,7 +86,7 @@ class TestImportPortfolioPaste:
         assert db.query(PortfolioSnapshot).count() == 2
         assert db.query(Holding).count() == 10
         tags = db.query(SecurityTag).filter(SecurityTag.security_key == "株式:8306").all()
-        assert len(tags) == 3  # 2回貼っても3軸ぶんのタグのまま
+        assert len(tags) == len(BUILTIN_AXES)  # 2回貼っても標準軸ぶんのタグのまま
 
     def test_empty_paste_raises(self, db):
         with pytest.raises(PortfolioParseError):

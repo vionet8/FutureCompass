@@ -7,7 +7,8 @@ from ..models.user import User
 from ..models.portfolio import ClassificationAxis, SecurityTag
 from ..services.portfolio_import import import_portfolio_paste, PortfolioParseError
 from ..services.portfolio_analysis import compute_breakdown, list_securities_with_tags
-from ..services.classification import ensure_builtin_axes
+from ..services.classification import ensure_builtin_axes, TIME_HORIZON_VALUES
+from ..services.wealth_bucket import get_bucket_summary, set_bucket_goal
 from .auth import get_current_user
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
@@ -25,6 +26,10 @@ class CreateAxisInput(BaseModel):
 class SetTagInput(BaseModel):
     axis_key: str
     value: str
+
+
+class SetBucketGoalInput(BaseModel):
+    target_amount_man: int
 
 
 @router.post("/snapshot")
@@ -154,3 +159,41 @@ def get_breakdown(
         "total_value_yen": result["total_value_yen"],
         "groups": result["groups"],
     }
+
+
+@router.get("/buckets")
+def get_buckets(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """「3つの財布」（長期・中期・短期）の現在額・目標額・達成率を返す"""
+    ensure_builtin_axes(db, current_user.id)
+    result = get_bucket_summary(db, current_user.id)
+    if result is None:
+        return {
+            "has_data": False,
+            "message": "保有資産のデータがありません。マネフォの保有資産ページを貼り付けてください。",
+        }
+    return {
+        "has_data": True,
+        "snapshot_created_at": result["snapshot_created_at"].isoformat(),
+        "total_value_yen": result["total_value_yen"],
+        "buckets": result["buckets"],
+        "unclassified_yen": result["unclassified_yen"],
+        "bucket_values": TIME_HORIZON_VALUES,
+    }
+
+
+@router.put("/buckets/{bucket_value}/goal")
+def put_bucket_goal(
+    bucket_value: str,
+    body: SetBucketGoalInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """指定バケット（長期/中期/短期）の目標金額を設定する"""
+    try:
+        set_bucket_goal(db, current_user.id, bucket_value, body.target_amount_man * 10000)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"bucket_value": bucket_value, "target_amount_man": body.target_amount_man}

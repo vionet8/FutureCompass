@@ -33,8 +33,8 @@ class Holding(Base):
 
 class ClassificationAxis(Base):
     """
-    分類軸の定義（通貨・資産クラス・商品タイプの標準3軸＋ユーザー追加のカスタム軸）。
-    is_builtin=Trueの3軸は新規銘柄の自動分類対象、カスタム軸は手動タグ付けのみ。
+    分類軸の定義（通貨・資産クラス・商品タイプ・資金の時間軸の標準4軸＋ユーザー追加のカスタム軸）。
+    is_builtin=Trueの4軸は新規銘柄の自動分類対象、カスタム軸は手動タグ付けのみ。
     """
     __tablename__ = "classification_axes"
     __table_args__ = (UniqueConstraint("user_id", "key", name="uq_axis_user_key"),)
@@ -62,4 +62,19 @@ class SecurityTag(Base):
     axis_id = Column(String, ForeignKey("classification_axes.id"), nullable=False, index=True)
     value = Column(String, nullable=False)
     is_auto = Column(Integer, default=1)  # 1=自動分類のデフォルト値、0=ユーザーが手動で確定済み
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WealthBucketGoal(Base):
+    """
+    「3つの財布」（長期・中期・短期）ごとの目標金額。
+    time_horizon軸のタグ値(bucket_value)ごとに1件、目標未設定なら行自体が存在しない。
+    """
+    __tablename__ = "wealth_bucket_goals"
+    __table_args__ = (UniqueConstraint("user_id", "bucket_value", name="uq_bucket_goal_user_value"),)
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    bucket_value = Column(String, nullable=False)  # "長期" | "中期" | "短期（1年以内）"
+    target_amount_yen = Column(Integer, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

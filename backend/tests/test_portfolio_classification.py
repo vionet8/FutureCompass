@@ -77,15 +77,15 @@ class TestAutoClassify:
 
 
 class TestEnsureBuiltinAxes:
-    def test_creates_three_axes(self, db):
+    def test_creates_builtin_axes(self, db):
         axes = ensure_builtin_axes(db, "u1")
         assert set(axes.keys()) == {k for k, _ in BUILTIN_AXES}
-        assert db.query(ClassificationAxis).filter(ClassificationAxis.user_id == "u1").count() == 3
+        assert db.query(ClassificationAxis).filter(ClassificationAxis.user_id == "u1").count() == len(BUILTIN_AXES)
 
     def test_idempotent(self, db):
         ensure_builtin_axes(db, "u1")
         ensure_builtin_axes(db, "u1")
-        assert db.query(ClassificationAxis).filter(ClassificationAxis.user_id == "u1").count() == 3
+        assert db.query(ClassificationAxis).filter(ClassificationAxis.user_id == "u1").count() == len(BUILTIN_AXES)
 
 
 class TestApplyAutoClassification:
@@ -93,7 +93,7 @@ class TestApplyAutoClassification:
         apply_auto_classification(db, "u1", "株式", "三菱UFJフィナンシャルG", "8306", "株式:8306")
         db.commit()
         tags = db.query(SecurityTag).filter(SecurityTag.security_key == "株式:8306").all()
-        assert len(tags) == 3
+        assert len(tags) == len(BUILTIN_AXES)
         assert all(t.is_auto == 1 for t in tags)
 
     def test_does_not_overwrite_user_edited_tag(self, db):

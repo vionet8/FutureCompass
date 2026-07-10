@@ -16,7 +16,12 @@ BUILTIN_AXES = [
     ("currency", "通貨"),
     ("asset_class", "資産クラス"),
     ("product_type", "商品タイプ"),
+    ("time_horizon", "資金の時間軸"),
 ]
+
+TIME_HORIZON_AXIS_KEY = "time_horizon"
+# 「3つの財布」: 長期（絶対に動かさない）/ 中期 / 短期（1年以内に使う可能性）
+TIME_HORIZON_VALUES = ["長期", "中期", "短期（1年以内）"]
 
 # 日本個別株：証券コード → (資産クラス, 商品タイプ)。通貨は常にJPY
 JP_STOCK_CLASS: dict[str, tuple[str, str]] = {
@@ -112,37 +117,53 @@ def ensure_builtin_axes(db: Session, user_id: str) -> dict[str, ClassificationAx
     return existing
 
 
+# カテゴリ→時間軸のデフォルト推定。年金は制度上引き出せないため確実に長期、
+# ポイント・現金は流動性が高く近々使う想定で短期、株式・投信は長期保有前提が
+# 多数派という前提でのデフォルト（住宅頭金用の課税口座など例外は手動で直す想定）。
+CATEGORY_TIME_HORIZON: dict[str, str] = {
+    "年金": "長期",
+    "ポイント": "短期（1年以内）",
+    "現金": "短期（1年以内）",
+    "株式": "長期",
+    "投資信託": "長期",
+}
+
+
 def auto_classify(category: str, name: str, symbol_code: str | None) -> dict[str, str]:
     """
-    銘柄をヒューリスティックで標準3軸に分類する。
-    戻り値: {"currency": ..., "asset_class": ..., "product_type": ...}
+    銘柄をヒューリスティックで標準4軸に分類する。
+    戻り値: {"currency": ..., "asset_class": ..., "product_type": ..., "time_horizon": ...}
     未知の銘柄はasset_class/product_typeが"未分類"になる（画面で手動修正する前提）。
+    time_horizonはカテゴリからの大まかな既定値であり、実際の資金使途に応じて
+    ユーザーが個別に修正することを前提とする。
     """
+    time_horizon = CATEGORY_TIME_HORIZON.get(category, "未分類")
+
     if category == "現金":
         for kw, (currency, product_type) in CASH_KEYWORDS:
             if kw in name:
-                return {"currency": currency, "asset_class": "現金", "product_type": product_type}
-        return {"currency": "JPY", "asset_class": "現金", "product_type": "現金・預金"}
+                return {"currency": currency, "asset_class": "現金", "product_type": product_type, "time_horizon": time_horizon}
+        return {"currency": "JPY", "asset_class": "現金", "product_type": "現金・預金", "time_horizon": time_horizon}
 
     if category == "株式":
         if symbol_code and symbol_code in JP_STOCK_CLASS:
             asset_class, product_type = JP_STOCK_CLASS[symbol_code]
-            return {"currency": "JPY", "asset_class": asset_class, "product_type": product_type}
+            return {"currency": "JPY", "asset_class": asset_class, "product_type": product_type, "time_horizon": time_horizon}
         if symbol_code and symbol_code in US_TICKER_CLASS:
             asset_class, product_type = US_TICKER_CLASS[symbol_code]
-            return {"currency": "USD", "asset_class": asset_class, "product_type": product_type}
-        return {"currency": "未分類", "asset_class": "未分類", "product_type": "未分類"}
+            return {"currency": "USD", "asset_class": asset_class, "product_type": product_type, "time_horizon": time_horizon}
+        return {"currency": "未分類", "asset_class": "未分類", "product_type": "未分類", "time_horizon": time_horizon}
 
     if category in ("投資信託", "年金"):
         for kw, (asset_class, product_type) in FUND_CLASS_KEYWORDS:
             if kw in name:
-                return {"currency": "JPY", "asset_class": asset_class, "product_type": product_type}
-        return {"currency": "JPY", "asset_class": "未分類", "product_type": "未分類"}
+                return {"currency": "JPY", "asset_class": asset_class, "product_type": product_type, "time_horizon": time_horizon}
+        return {"currency": "JPY", "asset_class": "未分類", "product_type": "未分類", "time_horizon": time_horizon}
 
     if category == "ポイント":
-        return {"currency": "JPY", "asset_class": "ポイント", "product_type": "ポイント"}
+        return {"currency": "JPY", "asset_class": "ポイント", "product_type": "ポイント", "time_horizon": time_horizon}
 
-    return {"currency": "未分類", "asset_class": "未分類", "product_type": "未分類"}
+    return {"currency": "未分類", "asset_class": "未分類", "product_type": "未分類", "time_horizon": time_horizon}
 
 
 def apply_auto_classification(
