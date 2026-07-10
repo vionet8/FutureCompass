@@ -198,6 +198,7 @@
     .chart-grid { grid-template-columns: 1fr; }
     .profile-grid { grid-template-columns: 1fr; }
     .full-width { grid-column: 1; }
+    .portfolio-breakdown-grid { grid-template-columns: 1fr !important; }
   }
 </style>
 </head>
@@ -209,6 +210,7 @@
     <button onclick="showPage('dashboard')" data-page="dashboard">ダッシュボード</button>
     <button onclick="showPage('household')" data-page="household">家計分析</button>
     <button onclick="showPage('performance')" data-page="performance">運用成績</button>
+    <button onclick="showPage('portfolio')" data-page="portfolio">保有資産</button>
     <button onclick="showPage('budget')" data-page="budget">予算管理</button>
     <button onclick="showPage('profile')" data-page="profile">プロフィール</button>
     <button onclick="showPage('scenarios')" data-page="scenarios">シナリオ比較</button>
@@ -991,6 +993,45 @@
   </div>
 </div>
 
+<!-- PORTFOLIO PAGE -->
+<div class="page" id="page-portfolio">
+  <div class="section-title">📦 保有資産の内訳</div>
+  <p style="color:var(--text2);margin-bottom:20px;font-size:.9rem;">マネーフォワード ME の「保有資産」ページ（<code>moneyforward.com/bs/portfolio</code>）全体を選択してコピーし、下に貼り付けてください。通貨・資産クラス・商品タイプの3軸で自動分類し、円グラフで内訳を表示します。</p>
+
+  <!-- 貼り付けフォーム -->
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;">
+    <div style="font-size:1rem;font-weight:600;margin-bottom:8px;">📋 保有資産ページを貼り付け</div>
+    <div style="font-size:.82rem;color:var(--text2);margin-bottom:12px;line-height:1.7;">
+      「預金・現金」「株式(現物)」「投資信託」「年金」「ポイント」の各セクション見出しを含む形でコピーしてください（ページ全体の選択コピーでOK）。貼り付けるたびに新しいスナップショットとして保存されます。
+    </div>
+    <textarea id="portfolioPasteInput" rows="6" placeholder="ここに貼り付け..."
+      style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:12px;border-radius:8px;font-size:.82rem;font-family:monospace;resize:vertical;"></textarea>
+    <button class="btn-primary" style="margin-top:10px;padding:10px 20px;border-radius:8px;" onclick="submitPortfolioPaste()">取り込む</button>
+    <div id="portfolioPasteResult" style="margin-top:12px;"></div>
+  </div>
+
+  <!-- 内訳グラフ -->
+  <div id="portfolioBreakdownCard" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;display:none;">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+      <div style="font-size:1rem;font-weight:600;">内訳</div>
+      <div id="portfolioAxisTabs" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+    </div>
+    <div class="portfolio-breakdown-grid" style="display:grid;grid-template-columns:1fr 260px;gap:20px;align-items:start;">
+      <canvas id="portfolioBreakdownChart" style="max-height:340px;"></canvas>
+      <div id="portfolioBreakdownLegend" style="font-size:.85rem;"></div>
+    </div>
+  </div>
+
+  <!-- 銘柄タグ編集 -->
+  <div id="portfolioSecuritiesCard" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;display:none;">
+    <div style="font-size:1rem;font-weight:600;margin-bottom:4px;">🏷️ 銘柄タグの確認・修正</div>
+    <div style="font-size:.78rem;color:var(--text2);margin-bottom:14px;">自動分類が実態と違う場合はここで修正できます（以後の貼り付けで上書きされなくなります）。</div>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:.85rem;" id="portfolioSecuritiesTable"></table>
+    </div>
+  </div>
+</div>
+
 <!-- HISTORY PAGE -->
 <div class="page" id="page-history">
   <div class="section-title">シミュレーション履歴</div>
@@ -1049,6 +1090,7 @@ function showPage(p) {
   if (p === 'budget' && token) { initBudgetMonth(); loadBudget(); }
   if (p === 'household' && token) initHouseholdPage();
   if (p === 'performance' && token) initPerformancePage();
+  if (p === 'portfolio' && token) initPortfolioPage();
 }
 
 function updateNav() {
@@ -2453,6 +2495,139 @@ async function deleteCashFlowEntry(id) {
     loadPerformanceSummary();
   } catch (e) {
     showAlert('cfAlert', e.message);
+  }
+}
+
+// ===== PORTFOLIO =====
+const PORTFOLIO_COLORS = ['#6c63ff', '#4ecdc4', '#ffd166', '#ff6b6b', '#a78bfa', '#4dabf7', '#69db7c', '#ff922b', '#f783ac', '#adb5bd'];
+let portfolioAxes = [];
+let portfolioActiveAxis = 'asset_class';
+
+async function initPortfolioPage() {
+  if (!token) return;
+  await loadPortfolioAxes();
+  loadPortfolioBreakdown();
+  loadPortfolioSecurities();
+}
+
+async function submitPortfolioPaste() {
+  const text = document.getElementById('portfolioPasteInput').value;
+  const resultEl = document.getElementById('portfolioPasteResult');
+  if (!text.trim()) return;
+  resultEl.innerHTML = '<div style="color:var(--text2);font-size:.85rem;">取り込み中...</div>';
+  try {
+    const r = await api('POST', '/portfolio/snapshot', { text });
+    resultEl.innerHTML = `<div class="alert alert-success">✅ ${r.holdings_count}件の保有銘柄を取り込みました（合計 ${Math.round(r.total_value_yen / 10000).toLocaleString()}万円）</div>`;
+    document.getElementById('portfolioPasteInput').value = '';
+    await loadPortfolioAxes();
+    loadPortfolioBreakdown();
+    loadPortfolioSecurities();
+  } catch (e) {
+    resultEl.innerHTML = `<div class="alert alert-error">❌ ${e.message}</div>`;
+  }
+}
+
+async function loadPortfolioAxes() {
+  portfolioAxes = await api('GET', '/portfolio/axes');
+  const tabs = document.getElementById('portfolioAxisTabs');
+  tabs.innerHTML = portfolioAxes.map(a => `
+    <button class="btn-secondary" data-axis="${a.key}"
+      style="padding:6px 14px;border-radius:20px;font-size:.82rem;${a.key === portfolioActiveAxis ? 'background:var(--accent);color:#fff;' : ''}"
+      onclick="selectPortfolioAxis('${a.key}')">${a.label}</button>
+  `).join('');
+}
+
+function selectPortfolioAxis(axisKey) {
+  portfolioActiveAxis = axisKey;
+  document.querySelectorAll('#portfolioAxisTabs button').forEach(b => {
+    b.style.background = b.dataset.axis === axisKey ? 'var(--accent)' : '';
+    b.style.color = b.dataset.axis === axisKey ? '#fff' : '';
+  });
+  loadPortfolioBreakdown();
+}
+
+async function loadPortfolioBreakdown() {
+  const card = document.getElementById('portfolioBreakdownCard');
+  try {
+    const r = await api('GET', `/portfolio/breakdown?axis=${portfolioActiveAxis}`);
+    if (!r.has_data) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+
+    destroyChart('portfolioBreakdownChart');
+    chartInsts['portfolioBreakdownChart'] = new Chart(document.getElementById('portfolioBreakdownChart'), {
+      type: 'doughnut',
+      data: {
+        labels: r.groups.map(g => g.value),
+        datasets: [{
+          data: r.groups.map(g => g.amount_yen),
+          backgroundColor: r.groups.map((_, i) => PORTFOLIO_COLORS[i % PORTFOLIO_COLORS.length]),
+          borderWidth: 0,
+        }],
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+      },
+    });
+
+    const total = r.total_value_yen;
+    document.getElementById('portfolioBreakdownLegend').innerHTML = r.groups.map((g, i) => `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">
+        <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+          <span style="width:10px;height:10px;border-radius:50%;background:${PORTFOLIO_COLORS[i % PORTFOLIO_COLORS.length]};flex-shrink:0;"></span>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${g.value}</span>
+        </div>
+        <div style="text-align:right;flex-shrink:0;color:var(--text2);">${g.pct}%</div>
+      </div>
+    `).join('') + `<div style="margin-top:10px;font-size:.8rem;color:var(--text2);">合計 ${Math.round(total / 10000).toLocaleString()}万円</div>`;
+  } catch (e) {
+    card.style.display = 'none';
+  }
+}
+
+async function loadPortfolioSecurities() {
+  const card = document.getElementById('portfolioSecuritiesCard');
+  try {
+    const securities = await api('GET', '/portfolio/securities');
+    if (!securities.length) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+
+    const axisCols = portfolioAxes.map(a => `<th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);color:var(--text2);font-size:.78rem;">${a.label}</th>`).join('');
+    const rows = securities.map(s => {
+      const cells = portfolioAxes.map(a => `
+        <td style="padding:6px 10px;border-bottom:1px solid var(--border);">
+          <input type="text" value="${(s.tags[a.key] || '').replace(/"/g, '&quot;')}"
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:.8rem;width:120px;"
+            onchange="updateSecurityTag('${s.security_key}', '${a.key}', this.value)">
+        </td>
+      `).join('');
+      return `<tr>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--border);">${s.name}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right;">${Math.round(s.market_value_yen / 10000).toLocaleString()}万円</td>
+        ${cells}
+      </tr>`;
+    }).join('');
+
+    document.getElementById('portfolioSecuritiesTable').innerHTML = `
+      <thead><tr>
+        <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);color:var(--text2);font-size:.78rem;">銘柄</th>
+        <th style="padding:8px 10px;text-align:right;border-bottom:1px solid var(--border);color:var(--text2);font-size:.78rem;">評価額</th>
+        ${axisCols}
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    `;
+  } catch (e) {
+    card.style.display = 'none';
+  }
+}
+
+async function updateSecurityTag(securityKey, axisKey, value) {
+  if (!value.trim()) return;
+  try {
+    await api('PUT', `/portfolio/securities/${encodeURIComponent(securityKey)}/tags`, { axis_key: axisKey, value });
+    loadPortfolioBreakdown();
+  } catch (e) {
+    alert('タグの更新に失敗しました: ' + e.message);
   }
 }
 </script>

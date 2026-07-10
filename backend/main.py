@@ -8,8 +8,8 @@ import threading
 
 from .core.config import get_settings
 from .core.database import Base, engine, SessionLocal
-from .models import user, profile, budget as budget_model, mf_transaction, auto_import, performance  # noqa: テーブル作成のためimport
-from .api import auth, profile as profile_api, simulate, budget, household, performance as performance_api
+from .models import user, profile, budget as budget_model, mf_transaction, auto_import, performance, portfolio  # noqa: テーブル作成のためimport
+from .api import auth, profile as profile_api, simulate, budget, household, performance as performance_api, portfolio as portfolio_api
 from .services.mf_import import scan_all_users
 
 settings = get_settings()
@@ -56,6 +56,7 @@ app.include_router(simulate.router, prefix="/api")
 app.include_router(budget.router, prefix="/api")
 app.include_router(household.router, prefix="/api")
 app.include_router(performance_api.router, prefix="/api")
+app.include_router(portfolio_api.router, prefix="/api")
 
 
 @app.get("/api/health")
