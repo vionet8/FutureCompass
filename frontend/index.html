@@ -2521,29 +2521,6 @@ async function loadWealthPercentile() {
         onclick="selectWealthAgeBand('${b}')">${b}${b === r.actual_age_band ? '（実年齢）' : ''}</button>
     `).join('');
 
-    // ピラミッド表示: 「◯万円以上を持つ世帯は何%か」の累積値なので、
-    // 閾値が高くなるほど単調に幅が狭くなり、正しいピラミッド形状になる。
-    // 閾値が高い(=レア)行ほど上に、低い(=ほぼ全員該当)行ほど下に並べる。
-    const rows = [...r.pyramid].sort((a, b) => b.threshold_man - a.threshold_man);
-    const maxPct = Math.max(...rows.map(d => d.pct_at_or_above), 1);
-    const pyramidRows = rows.map(d => {
-      const widthPct = Math.max(3, (d.pct_at_or_above / maxPct) * 100);
-      const barColor = d.is_user_level ? 'var(--accent)' : 'rgba(139,144,167,.35)';
-      const labelColor = d.is_user_level ? 'var(--text)' : 'var(--text2)';
-      return `
-        <div style="display:flex;align-items:center;gap:10px;padding:2px 0;">
-          <div style="width:120px;flex-shrink:0;text-align:right;font-size:.74rem;color:${labelColor};font-weight:${d.is_user_level ? '700' : '400'};">
-            ${d.is_user_level ? '👉 ' : ''}${d.label}
-          </div>
-          <div style="flex:1;display:flex;justify-content:center;">
-            <div style="width:${widthPct}%;min-width:22px;height:22px;background:${barColor};border-radius:4px;display:flex;align-items:center;justify-content:center;transition:width .3s;">
-              <span style="font-size:.68rem;color:${d.is_user_level ? '#fff' : 'var(--text2)'};font-weight:${d.is_user_level ? '700' : '400'};">${d.pct_at_or_above}%</span>
-            </div>
-          </div>
-        </div>
-      `;
-    }).join('');
-
     const body = document.getElementById('wealthPercentileBody');
     body.innerHTML = `
       <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:16px;">${tabs}</div>
@@ -2551,7 +2528,7 @@ async function loadWealthPercentile() {
         <div style="font-size:.85rem;color:var(--text2);margin-bottom:6px;">${r.age_band}のあなたは総資産${r.total_assets_man.toLocaleString()}万円 —</div>
         <div style="font-size:2.2rem;font-weight:800;color:var(--accent2);">上位 ${r.top_percent}%</div>
       </div>
-      <div style="max-width:480px;margin:0 auto;">${pyramidRows}</div>
+      ${buildWealthPyramidSvg(r.pyramid)}
       <div style="font-size:.72rem;color:var(--text2);margin-top:14px;text-align:center;">出典: ${r.source}（区分別の統計から線形補間した概算値であり、正確な順位ではありません）</div>
     `;
   } catch (e) {
@@ -2562,6 +2539,43 @@ async function loadWealthPercentile() {
 function selectWealthAgeBand(band) {
   wealthAgeBandOverride = band;
   loadWealthPercentile();
+}
+
+function buildWealthPyramidSvg(pyramid) {
+  // 台形を隙間なく積み重ね、輪郭が連続した三角形になる本物のピラミッド。
+  // 各段の下辺幅=自分の累積%、上辺幅=1段上（より高い閾値）の累積%とすることで、
+  // 段と段の境界がぴったり繋がり、頂点(1億円以上)に向かって滑らかに先細りする。
+  const rows = [...pyramid].sort((a, b) => a.threshold_man - b.threshold_man); // 下(0円)→上(1億円)
+  const n = rows.length;
+  const maxPct = rows[0].pct_at_or_above || 100;
+
+  const svgW = 520, svgH = 40 * n, cx = 130, baseHalfW = 110;
+  const rowH = svgH / n;
+  const halfWidthAt = (pct) => (pct / maxPct) * baseHalfW;
+
+  const bands = rows.map((row, i) => {
+    const yBottom = svgH - i * rowH;
+    const yTop = svgH - (i + 1) * rowH;
+    const bottomHalf = halfWidthAt(row.pct_at_or_above);
+    const topHalf = i + 1 < n ? halfWidthAt(rows[i + 1].pct_at_or_above) : 0;
+    const fill = row.is_user_level ? 'var(--accent)' : 'rgba(139,144,167,.30)';
+    const stroke = row.is_user_level ? 'var(--accent2)' : 'var(--bg2)';
+    const points = [
+      [cx - bottomHalf, yBottom], [cx + bottomHalf, yBottom],
+      [cx + topHalf, yTop], [cx - topHalf, yTop],
+    ].map(p => p.join(',')).join(' ');
+    const labelY = (yTop + yBottom) / 2;
+    const labelColor = row.is_user_level ? 'var(--text)' : 'var(--text2)';
+    const weight = row.is_user_level ? '700' : '400';
+    return `
+      <polygon points="${points}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" />
+      <text x="${cx + baseHalfW + 16}" y="${labelY + 4}" fill="${labelColor}" font-size="12" font-weight="${weight}">
+        ${row.is_user_level ? '👉 ' : ''}${row.label}　${row.pct_at_or_above}%
+      </text>
+    `;
+  }).join('');
+
+  return `<svg viewBox="0 0 ${svgW} ${svgH}" style="width:100%;max-width:520px;display:block;margin:0 auto;">${bands}</svg>`;
 }
 
 // ===== PORTFOLIO =====
