@@ -2877,6 +2877,11 @@ async function loadPortfolioBreakdown() {
 
 const PORTFOLIO_CATEGORY_ORDER = ['現金', '株式', '投資信託', '年金', 'ポイント'];
 
+const PORTFOLIO_SELECT_OPTIONS = {
+  time_horizon: ['長期', '中期', '短期（1年以内）'],
+  cyclicality: ['景気敏感', 'ディフェンシブ'],
+};
+
 async function loadPortfolioSecurities() {
   const card = document.getElementById('portfolioSecuritiesCard');
   try {
@@ -2884,7 +2889,6 @@ async function loadPortfolioSecurities() {
     if (!securities.length) { card.style.display = 'none'; return; }
     card.style.display = 'block';
 
-    const TIME_HORIZON_OPTIONS = ['長期', '中期', '短期（1年以内）'];
     const axisCols = portfolioAxes.map(a => `<th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);color:var(--text2);font-size:.78rem;">${a.label}</th>`).join('');
 
     const byCategory = {};
@@ -2898,11 +2902,13 @@ async function loadPortfolioSecurities() {
 
     const sections = categories.map(cat => {
       const items = byCategory[cat];
+      const allExcluded = items.every(s => s.excluded);
       const rows = items.map(s => {
         const cells = portfolioAxes.map(a => {
           const current = s.tags[a.key] || '';
-          if (a.key === 'time_horizon') {
-            const opts = ['<option value="">未設定</option>', ...TIME_HORIZON_OPTIONS.map(v =>
+          const options = PORTFOLIO_SELECT_OPTIONS[a.key];
+          if (options) {
+            const opts = ['<option value="">未設定</option>', ...options.map(v =>
               `<option value="${v}" ${v === current ? 'selected' : ''}>${v}</option>`)].join('');
             return `
               <td style="padding:6px 10px;border-bottom:1px solid var(--border);">
@@ -2919,19 +2925,31 @@ async function loadPortfolioSecurities() {
             </td>
           `;
         }).join('');
-        return `<tr>
-          <td style="padding:6px 10px;border-bottom:1px solid var(--border);">${s.name}</td>
+        const rowOpacity = s.excluded ? 'opacity:.45;' : '';
+        return `<tr style="${rowOpacity}">
+          <td style="padding:6px 10px;border-bottom:1px solid var(--border);">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+              <input type="checkbox" ${s.excluded ? 'checked' : ''} title="計算対象外にする"
+                onchange="updateSecurityExclusion('${s.security_key}', this.checked)">
+              ${s.name}
+            </label>
+          </td>
           <td style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right;">${(s.market_value_yen / 10000).toFixed(1)}万円</td>
           ${cells}
         </tr>`;
       }).join('');
       const subtotal = items.reduce((sum, s) => sum + s.market_value_yen, 0);
+      const activeSubtotal = items.filter(s => !s.excluded).reduce((sum, s) => sum + s.market_value_yen, 0);
 
       return `
         <div style="border:1px solid var(--border);border-radius:10px;margin-bottom:14px;overflow:hidden;">
-          <div style="background:var(--bg3);padding:8px 12px;font-size:.85rem;font-weight:600;display:flex;justify-content:space-between;">
+          <div style="background:var(--bg3);padding:8px 12px;font-size:.85rem;font-weight:600;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
             <span>${cat}</span>
-            <span style="color:var(--text2);font-weight:400;">${items.length}件　${(subtotal / 10000).toFixed(1)}万円</span>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="color:var(--text2);font-weight:400;">${items.length}件　${activeSubtotal !== subtotal ? `<s style="opacity:.6;">${(subtotal / 10000).toFixed(1)}万円</s> ` : ''}${(activeSubtotal / 10000).toFixed(1)}万円</span>
+              <button class="btn-secondary" style="padding:3px 10px;border-radius:6px;font-size:.72rem;"
+                onclick="bulkExcludeCategory('${cat}', ${!allExcluded})">${allExcluded ? 'すべて対象に戻す' : 'このカテゴリを計算対象外にする'}</button>
+            </div>
           </div>
           <table style="width:100%;border-collapse:collapse;font-size:.85rem;">
             <thead><tr>
@@ -2959,6 +2977,28 @@ async function updateSecurityTag(securityKey, axisKey, value) {
     if (axisKey === 'time_horizon') loadWalletBuckets();
   } catch (e) {
     alert('タグの更新に失敗しました: ' + e.message);
+  }
+}
+
+async function updateSecurityExclusion(securityKey, excluded) {
+  try {
+    await api('PUT', `/portfolio/securities/${encodeURIComponent(securityKey)}/exclude`, { excluded });
+    loadPortfolioBreakdown();
+    loadWalletBuckets();
+    loadPortfolioSecurities();
+  } catch (e) {
+    alert('計算対象外設定の更新に失敗しました: ' + e.message);
+  }
+}
+
+async function bulkExcludeCategory(category, excluded) {
+  try {
+    await api('PUT', `/portfolio/categories/${encodeURIComponent(category)}/exclude`, { excluded });
+    loadPortfolioBreakdown();
+    loadWalletBuckets();
+    loadPortfolioSecurities();
+  } catch (e) {
+    alert('一括設定に失敗しました: ' + e.message);
   }
 }
 

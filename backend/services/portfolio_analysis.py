@@ -2,7 +2,7 @@
 
 from sqlalchemy.orm import Session
 
-from ..models.portfolio import PortfolioSnapshot, Holding, ClassificationAxis, SecurityTag
+from ..models.portfolio import PortfolioSnapshot, Holding, ClassificationAxis, SecurityTag, SecurityExclusion
 
 UNCLASSIFIED = "未分類"
 
@@ -16,9 +16,17 @@ def get_latest_snapshot(db: Session, user_id: str) -> PortfolioSnapshot | None:
     )
 
 
+def _excluded_security_keys(db: Session, user_id: str) -> set[str]:
+    return {
+        e.security_key for e in db.query(SecurityExclusion)
+        .filter(SecurityExclusion.user_id == user_id).all()
+    }
+
+
 def compute_breakdown(db: Session, user_id: str, axis_key: str) -> dict | None:
     """
     最新スナップショットの保有銘柄を、指定軸のタグ値で集計する。
+    「計算対象外」に設定された銘柄(SecurityExclusion)は集計から除く。
     戻り値: {"snapshot_created_at", "total_value_yen", "groups": [{"value", "amount_yen", "pct"}, ...]}
     スナップショットが無い、または軸が存在しない場合はNone。
     """
@@ -34,7 +42,11 @@ def compute_breakdown(db: Session, user_id: str, axis_key: str) -> dict | None:
     if axis is None:
         return None
 
-    holdings = db.query(Holding).filter(Holding.snapshot_id == snapshot.id).all()
+    excluded = _excluded_security_keys(db, user_id)
+    holdings = [
+        h for h in db.query(Holding).filter(Holding.snapshot_id == snapshot.id).all()
+        if h.security_key not in excluded
+    ]
     if not holdings:
         return None
 
@@ -68,7 +80,7 @@ def compute_breakdown(db: Session, user_id: str, axis_key: str) -> dict | None:
 
 def list_securities_with_tags(db: Session, user_id: str) -> list[dict]:
     """
-    最新スナップショットに含まれる銘柄一覧を、全軸のタグ付きで返す（タグ編集UI用）。
+    最新スナップショットに含まれる銘柄一覧を、全軸のタグ・除外フラグ付きで返す（タグ編集UI用）。
     同一security_keyが複数の保有(異なる口座等)にまたがる場合は評価額を合算する。
     """
     snapshot = get_latest_snapshot(db, user_id)
@@ -97,8 +109,43 @@ def list_securities_with_tags(db: Session, user_id: str) -> list[dict]:
             continue
         tags_by_security.setdefault(t.security_key, {})[axis_key] = t.value
 
+    excluded = _excluded_security_keys(db, user_id)
+
     result = list(merged.values())
     for item in result:
         item["tags"] = tags_by_security.get(item["security_key"], {})
+        item["excluded"] = item["security_key"] in excluded
     result.sort(key=lambda x: -x["market_value_yen"])
     return result
+
+
+def set_security_excluded(db: Session, user_id: str, security_key: str, excluded: bool) -> None:
+    """1銘柄の計算対象外フラグを設定・解除する"""
+    existing = (
+        db.query(SecurityExclusion)
+        .filter(SecurityExclusion.user_id == user_id, SecurityExclusion.security_key == security_key)
+        .first()
+    )
+    if excluded and existing is None:
+        db.add(SecurityExclusion(user_id=user_id, security_key=security_key))
+    elif not excluded and existing is not None:
+        db.delete(existing)
+    db.commit()
+
+
+def set_category_excluded(db: Session, user_id: str, category: str, excluded: bool) -> int:
+    """
+    最新スナップショットのうち指定カテゴリに属する銘柄すべての計算対象外フラグを
+    一括設定・解除する。対象になった銘柄数を返す。
+    """
+    snapshot = get_latest_snapshot(db, user_id)
+    if snapshot is None:
+        return 0
+
+    security_keys = {
+        h.security_key for h in db.query(Holding)
+        .filter(Holding.snapshot_id == snapshot.id, Holding.category == category).all()
+    }
+    for key in security_keys:
+        set_security_excluded(db, user_id, key, excluded)
+    return len(security_keys)

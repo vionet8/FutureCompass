@@ -6,7 +6,12 @@ from ..core.database import get_db
 from ..models.user import User
 from ..models.portfolio import ClassificationAxis, SecurityTag
 from ..services.portfolio_import import import_portfolio_paste, PortfolioParseError
-from ..services.portfolio_analysis import compute_breakdown, list_securities_with_tags
+from ..services.portfolio_analysis import (
+    compute_breakdown,
+    list_securities_with_tags,
+    set_security_excluded,
+    set_category_excluded,
+)
 from ..services.classification import ensure_builtin_axes, TIME_HORIZON_VALUES
 from ..services.wealth_bucket import get_bucket_summary, set_bucket_goal
 from .auth import get_current_user
@@ -30,6 +35,10 @@ class SetTagInput(BaseModel):
 
 class SetBucketGoalInput(BaseModel):
     target_amount_man: int
+
+
+class SetExclusionInput(BaseModel):
+    excluded: bool
 
 
 @router.post("/snapshot")
@@ -197,3 +206,27 @@ def put_bucket_goal(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return {"bucket_value": bucket_value, "target_amount_man": body.target_amount_man}
+
+
+@router.put("/securities/{security_key}/exclude")
+def put_security_exclusion(
+    security_key: str,
+    body: SetExclusionInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """1銘柄を内訳集計から計算対象外にする・戻す"""
+    set_security_excluded(db, current_user.id, security_key, body.excluded)
+    return {"security_key": security_key, "excluded": body.excluded}
+
+
+@router.put("/categories/{category}/exclude")
+def put_category_exclusion(
+    category: str,
+    body: SetExclusionInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """指定カテゴリ（現金/株式/投資信託/年金/ポイント）に属する銘柄を一括で計算対象外にする・戻す"""
+    count = set_category_excluded(db, current_user.id, category, body.excluded)
+    return {"category": category, "excluded": body.excluded, "affected_count": count}

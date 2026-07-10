@@ -78,3 +78,18 @@ class WealthBucketGoal(Base):
     bucket_value = Column(String, nullable=False)  # "長期" | "中期" | "短期（1年以内）"
     target_amount_yen = Column(Integer, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SecurityExclusion(Base):
+    """
+    銘柄マスター単位の「計算対象外」フラグ。行が存在する=除外。
+    内訳グラフ・3つの財布などの集計から一律で除外したい銘柄
+    （例: 少額のポイント類をまとめて対象外にしたい場合）に使う。
+    """
+    __tablename__ = "security_exclusions"
+    __table_args__ = (UniqueConstraint("user_id", "security_key", name="uq_exclusion_user_security"),)
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    security_key = Column(String, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
