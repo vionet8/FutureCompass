@@ -374,10 +374,18 @@
   <div class="chart-grid">
     <div class="chart-card">
       <div style="margin-bottom:10px">
+        <div class="section-title" style="font-size:1rem;margin-bottom:2px">💰 家計収支の内訳（現役〜老後）</div>
+        <div id="householdBreakdownChartSub" style="font-size:.78rem;color:var(--text2)">灰＝就労所得、水色＝年金所得、紫＝運用が生んだ金融所得。赤＝消費。黄線＝これらを合算した家計収支</div>
+      </div>
+      <canvas id="householdBreakdownChart"></canvas>
+    </div>
+    <div class="chart-card">
+      <div style="margin-bottom:10px">
         <div class="section-title" style="font-size:1rem;margin-bottom:2px">📈 資産推移（将来予測）</div>
         <div id="assetsChartSub" style="font-size:.78rem;color:var(--text2)">現在〜老後まで、資産がどう増減するかの予測。紫＝予測資産、赤点線＝FIRE達成ライン</div>
       </div>
       <canvas id="assetsChart"></canvas>
+      <div id="assetsChartDepletionNote" style="font-size:.78rem;color:var(--warn);margin-top:8px;"></div>
     </div>
     <div class="chart-card">
       <div style="margin-bottom:10px">
@@ -1458,6 +1466,7 @@ function renderDashboard(result, aiReport) {
   renderExpenseChart(every2);
   renderCashflowChart(every2);
   renderIncomeChart(cur);
+  renderHouseholdBreakdownChart(every5);
 
   // ── AI Report（詳細モードのみ） ───────────────
   if (aiReport) {
@@ -1589,6 +1598,10 @@ const CHART_OPTS = {
 
 function renderAssetsChart(snaps) {
   destroyChart('assetsChart');
+  // 資産が0以下になる最初の年齢を検出（資産枯渇マーカー用）
+  const depletedIdx = snaps.findIndex(s => s.assets <= 0);
+  const pointColors = snaps.map((_, i) => i === depletedIdx ? '#ff6b6b' : '#6c63ff');
+  const pointRadii = snaps.map((_, i) => i === depletedIdx ? 6 : 3);
   chartInsts['assetsChart'] = new Chart(document.getElementById('assetsChart'), {
     type: 'line',
     data: {
@@ -1599,7 +1612,9 @@ function renderAssetsChart(snaps) {
           data: snaps.map(s => s.assets),
           borderColor: '#6c63ff',
           backgroundColor: 'rgba(108,99,255,.12)',
-          fill: true, tension: 0.3, pointRadius: 3,
+          pointBackgroundColor: pointColors,
+          pointBorderColor: pointColors,
+          fill: true, tension: 0.3, pointRadius: pointRadii,
         },
         {
           label: 'FIRE目標額',
@@ -1611,7 +1626,87 @@ function renderAssetsChart(snaps) {
         },
       ],
     },
-    options: { ...CHART_OPTS },
+    options: {
+      ...CHART_OPTS,
+      plugins: {
+        ...(CHART_OPTS.plugins || {}),
+        tooltip: {
+          callbacks: {
+            afterLabel: (ctx) => (ctx.datasetIndex === 0 && ctx.dataIndex === depletedIdx) ? '⚠ 資産枯渇' : '',
+          },
+        },
+      },
+    },
+  });
+  const noteEl = document.getElementById('assetsChartDepletionNote');
+  if (noteEl) {
+    noteEl.textContent = depletedIdx >= 0
+      ? `⚠ ${snaps[depletedIdx].age}歳ごろに資産が枯渇する見込みです。`
+      : '';
+  }
+}
+
+function renderHouseholdBreakdownChart(snaps) {
+  destroyChart('householdBreakdownChart');
+  chartInsts['householdBreakdownChart'] = new Chart(document.getElementById('householdBreakdownChart'), {
+    type: 'line',
+    data: {
+      labels: snaps.map(s => s.age + '歳'),
+      datasets: [
+        {
+          label: '就労所得',
+          data: snaps.map(s => s.labor_income_nominal),
+          borderColor: 'rgba(139,144,167,.9)',
+          backgroundColor: 'rgba(139,144,167,.35)',
+          stack: 'hh', fill: true, pointRadius: 0, borderWidth: 1, tension: 0.2,
+        },
+        {
+          label: '年金所得',
+          data: snaps.map(s => s.pension_income_nominal),
+          borderColor: 'rgba(108,99,255,.5)',
+          backgroundColor: 'rgba(108,99,255,.25)',
+          stack: 'hh', fill: true, pointRadius: 0, borderWidth: 1, tension: 0.2,
+        },
+        {
+          label: '金融所得（運用益）',
+          data: snaps.map(s => s.financial_income_nominal),
+          borderColor: '#6c63ff',
+          backgroundColor: 'rgba(108,99,255,.55)',
+          stack: 'hh', fill: true, pointRadius: 0, borderWidth: 1, tension: 0.2,
+        },
+        {
+          label: '消費（生活費+教育費）',
+          data: snaps.map(s => -s.total_expense_real),
+          borderColor: 'rgba(255,107,107,.9)',
+          backgroundColor: 'rgba(255,107,107,.5)',
+          stack: 'hh', fill: true, pointRadius: 0, borderWidth: 1, tension: 0.2,
+        },
+        {
+          label: '家計収支（運用益込み）',
+          data: snaps.map(s => s.household_balance_incl_returns),
+          borderColor: '#ffd166',
+          backgroundColor: 'transparent',
+          borderWidth: 2.5, pointRadius: 0, tension: 0.2,
+          stack: 'net', fill: false, order: -1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { labels: { color: '#8b90a7', boxWidth: 12, font: { size: 10.5 } } } },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8b90a7', maxTicksLimit: 8 }, grid: { color: '#2e3248' } },
+        y: {
+          stacked: true,
+          ticks: { color: '#8b90a7', callback: v => {
+            if (v === 0) return '0万';
+            if (Math.abs(v) >= 10000) return (Math.round(v / 1000) / 10) + '億';
+            return fmt(Math.round(v)) + '万';
+          }},
+          grid: { color: '#2e3248' },
+        },
+      },
+    },
   });
 }
 

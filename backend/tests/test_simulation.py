@@ -180,6 +180,56 @@ class TestAssetDecomposition:
 
 
 # ──────────────────────────────────────────────
+# 収入の内訳（就労所得/年金所得/金融所得チャート用）
+# ──────────────────────────────────────────────
+
+class TestIncomeBreakdown:
+    def test_working_years_have_labor_no_pension(self):
+        """就労中は労働所得のみ、年金所得は0"""
+        r = simulate(base_input(age=35, retirement_age=65, spouse_age=None))
+        s0 = r["snapshots"][0]
+        assert s0["labor_income_nominal"] > 0
+        assert s0["pension_income_nominal"] == 0
+
+    def test_retirement_years_have_pension_no_labor(self):
+        """退職後は年金所得のみ、労働所得は0（本人・配偶者とも受給年齢後）"""
+        p = base_input(age=68, spouse_age=68, retirement_age=65, spouse_retirement_age=65)
+        r = simulate(p)
+        s0 = r["snapshots"][0]
+        assert s0["labor_income_nominal"] == 0
+        assert s0["pension_income_nominal"] > 0
+
+    def test_labor_plus_pension_equals_total_income(self):
+        """就労所得+年金所得 = total_income_nominal が全年で成立する"""
+        r = simulate(base_input())
+        for s in r["snapshots"]:
+            diff = s["total_income_nominal"] - (s["labor_income_nominal"] + s["pension_income_nominal"])
+            assert abs(diff) <= 1, f"age={s['age']} diff={diff}"
+
+    def test_financial_income_matches_market_gain(self):
+        """financial_income_nominalはmarket_gainと一致する（同じ運用益を指す）"""
+        r = simulate(base_input())
+        for s in r["snapshots"]:
+            assert s["financial_income_nominal"] == s["market_gain"]
+
+    def test_household_balance_incl_returns_formula(self):
+        """household_balance_incl_returns = 総収入+金融所得-総支出"""
+        r = simulate(base_input())
+        for s in r["snapshots"]:
+            expected = s["total_income_nominal"] + s["financial_income_nominal"] - s["total_expense_real"]
+            assert abs(s["household_balance_incl_returns"] - expected) <= 1
+
+    def test_spouse_transitions_from_labor_to_pension_at_65(self):
+        """配偶者が65歳になった年から年金所得に切り替わる"""
+        p = base_input(age=63, spouse_age=63, retirement_age=70, spouse_retirement_age=70)
+        r = simulate(p)
+        before = next(s for s in r["snapshots"] if s["age"] == 64)  # 配偶者64歳
+        after = next(s for s in r["snapshots"] if s["age"] == 65)   # 配偶者65歳
+        assert before["pension_income_nominal"] == 0
+        assert after["pension_income_nominal"] > 0
+
+
+# ──────────────────────────────────────────────
 # FIRE判定
 # ──────────────────────────────────────────────
 

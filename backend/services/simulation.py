@@ -174,6 +174,12 @@ class YearlySnapshot:
     spouse_income_nominal: int
     total_income_nominal: int
 
+    # 収入の内訳（家計収支チャート用: 就労所得/金融所得/年金所得の積み上げに使う）
+    labor_income_nominal: int      # 本人+配偶者の就労収入（退職後・年金受給後は0）
+    pension_income_nominal: int    # 本人+配偶者の公的年金収入（就労中は0）
+    financial_income_nominal: int  # その年に投資資産が生んだ運用収益（現金の利息含む）
+    household_balance_incl_returns: int  # (就労+年金+金融所得) - 消費。運用益を収入とみなした場合の家計収支
+
     # 支出（インフレ調整済み実質）
     living_expense_real: int     # 生活費
     education_expense_real: int  # 教育費
@@ -320,7 +326,10 @@ def simulate(params: LifePlanInput) -> dict:
         events: list[LifeStageEvent] = []
 
         # ── 収入計算（名目） ──────────────────────
-        if age < params.retirement_age:
+        # is_pension: この年のincome/spouse_incomeが「年金」由来かどうか
+        # （就労所得/年金所得の積み上げチャート用に、後段でどちらへ計上するか判定する）
+        self_is_pension = age >= params.retirement_age
+        if not self_is_pension:
             # 年功序列カーブ（現在年齢で正規化）× 名目賃金成長
             base_income = params.annual_income * (1 + income_growth) ** i
             peak_factor = _income_peak_factor(age) / base_peak
@@ -333,10 +342,12 @@ def simulate(params: LifePlanInput) -> dict:
             income *= (1 + inf * 0.5) ** (age - params.retirement_age)  # マクロ経済スライド
 
         spouse_income = 0.0
+        spouse_is_pension = False
         if params.spouse_age is not None:
             spouse_current_age = params.spouse_age + i
             if spouse_current_age >= 65:
                 # 配偶者の公的年金（65歳から）
+                spouse_is_pension = True
                 quit = params.spouse_quit_age
                 career_end = min(quit, params.spouse_retirement_age) if quit else params.spouse_retirement_age
                 s_working_years = max(career_end - CAREER_START_AGE, 0)
@@ -361,6 +372,9 @@ def simulate(params: LifePlanInput) -> dict:
                 spouse_income = params.spouse_income * (1 + income_growth) ** i * spouse_peak
 
         total_income = income + spouse_income
+
+        labor_income = (0 if self_is_pension else income) + (0 if spouse_is_pension else spouse_income)
+        pension_income = (income if self_is_pension else 0) + (spouse_income if spouse_is_pension else 0)
 
         # ── 支出計算（インフレ調整済み） ─────────
         # 生活費（インフレ連動）
@@ -430,6 +444,11 @@ def simulate(params: LifePlanInput) -> dict:
         #   ※ market_gain + behavior_gain = asset_change が成立する（丸め誤差除く）
         market_gain = int(cash_before * CASH_RATE + invest_before * r + investment * r / 2)
         behavior_gain = int(net_cashflow + investment)
+        # 家計収支チャート用: 運用益をその年の「収入」とみなした場合の家計収支
+        # （実際の資産計算では運用益は取り崩さず複利で残すが、このチャートは
+        #   「投資が生む収入」を可視化する目的の別レンズとして市場要因分をそのまま使う）
+        financial_income = market_gain
+        household_balance_incl_returns = int(total_income + financial_income - total_expense)
         asset_change = int(assets - assets_before)
         total_controllable = abs(market_gain) + abs(behavior_gain)
         behavior_pct = (
@@ -467,6 +486,10 @@ def simulate(params: LifePlanInput) -> dict:
             income_nominal=int(income),
             spouse_income_nominal=int(spouse_income),
             total_income_nominal=int(total_income),
+            labor_income_nominal=int(labor_income),
+            pension_income_nominal=int(pension_income),
+            financial_income_nominal=int(financial_income),
+            household_balance_incl_returns=household_balance_incl_returns,
             living_expense_real=int(living_expense),
             education_expense_real=int(education_expense),
             total_expense_real=int(total_expense),
@@ -639,6 +662,10 @@ def _snap_to_dict(s: YearlySnapshot) -> dict:
         "income_nominal": s.income_nominal,
         "spouse_income_nominal": s.spouse_income_nominal,
         "total_income_nominal": s.total_income_nominal,
+        "labor_income_nominal": s.labor_income_nominal,
+        "pension_income_nominal": s.pension_income_nominal,
+        "financial_income_nominal": s.financial_income_nominal,
+        "household_balance_incl_returns": s.household_balance_incl_returns,
         # 支出
         "living_expense_real": s.living_expense_real,
         "education_expense_real": s.education_expense_real,
