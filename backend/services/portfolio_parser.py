@@ -21,13 +21,14 @@ SECTION_MARKERS = {
 }
 
 # 各セクションの列レイアウト（タブ分割後のインデックス）
-# 値は (name_idx, value_idx, institution_idx, symbol_code_idx|None)
+# quantityは保有株数（配当収入の計算に使う）。株式セクションのみ取得し、
+# 投資信託の保有数（口数、1万口単位で意味が違う）は対象外とする。
 SECTION_COLUMNS = {
-    "現金": {"name": 0, "value": 1, "institution": 2, "symbol": None},
-    "株式": {"name": 1, "value": 5, "institution": 9, "symbol": 0},
-    "投資信託": {"name": 0, "value": 4, "institution": 8, "symbol": None},
-    "年金": {"name": 0, "value": 2, "institution": None, "symbol": None},  # value=現在価値
-    "ポイント": {"name": 0, "value": 4, "institution": 6, "symbol": None},  # value=現在の価値
+    "現金": {"name": 0, "value": 1, "institution": 2, "symbol": None, "quantity": None},
+    "株式": {"name": 1, "value": 5, "institution": 9, "symbol": 0, "quantity": 2},
+    "投資信託": {"name": 0, "value": 4, "institution": 8, "symbol": None, "quantity": None},
+    "年金": {"name": 0, "value": 2, "institution": None, "symbol": None, "quantity": None},  # value=現在価値
+    "ポイント": {"name": 0, "value": 4, "institution": 6, "symbol": None, "quantity": None},  # value=現在の価値
 }
 
 
@@ -38,6 +39,7 @@ class ParsedHolding:
     market_value_yen: int
     institution: Optional[str]
     symbol_code: Optional[str]
+    quantity: Optional[float] = None  # 保有株数（株式のみ。米国株は端株がありうるためfloat）
 
     @property
     def security_key(self) -> str:
@@ -132,12 +134,21 @@ def parse_portfolio_paste_with_sections(text: str) -> tuple[list[ParsedHolding],
         if cols["symbol"] is not None:
             symbol_code = fields[cols["symbol"]].strip() or None
 
+        quantity = None
+        if cols["quantity"] is not None:
+            qty_text = fields[cols["quantity"]].strip().replace(",", "")
+            try:
+                quantity = float(qty_text)
+            except ValueError:
+                quantity = None
+
         holdings.append(ParsedHolding(
             category=current_section,
             name=name,
             market_value_yen=value,
             institution=institution,
             symbol_code=symbol_code,
+            quantity=quantity,
         ))
 
     return holdings, detected_sections

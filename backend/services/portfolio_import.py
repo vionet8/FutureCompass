@@ -46,6 +46,7 @@ def import_portfolio_paste(db: Session, user_id: str, text: str) -> dict:
             name=h.name,
             institution=h.institution,
             market_value_yen=h.market_value_yen,
+            quantity=h.quantity,
         ))
         apply_auto_classification(db, user_id, h.category, h.name, h.symbol_code, h.security_key)
 

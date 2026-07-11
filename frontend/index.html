@@ -1062,6 +1062,18 @@
     </div>
   </div>
 
+  <!-- 配当カレンダー -->
+  <div id="dividendCard" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;display:none;">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:4px;">
+      <div style="font-size:1rem;font-weight:600;">💸 配当カレンダー</div>
+      <button class="btn-secondary" style="padding:8px 18px;border-radius:8px;" onclick="refreshDividends()" id="divRefreshBtn">株価・配当を更新</button>
+    </div>
+    <div style="font-size:.78rem;color:var(--text2);margin-bottom:14px;line-height:1.6;">
+      過去1年の配当実績ベース。月別は権利落ち月で集計しており、実際の入金は日本株で2〜3ヶ月後になります。米国株の配当はその日のドル円レートで円換算しています。
+    </div>
+    <div id="dividendBody"></div>
+  </div>
+
   <!-- 銘柄タグ編集 -->
   <div id="portfolioSecuritiesCard" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:24px;display:none;">
     <div style="font-size:1rem;font-weight:600;margin-bottom:4px;">🏷️ 銘柄タグの確認・修正</div>
@@ -2797,6 +2809,115 @@ async function initPortfolioPage() {
   loadPortfolioBreakdown();
   loadPortfolioSecurities();
   loadWalletBuckets();
+  loadDividends();
+}
+
+// ===== DIVIDENDS =====
+async function refreshDividends() {
+  const btn = document.getElementById('divRefreshBtn');
+  btn.disabled = true;
+  btn.textContent = '更新中...';
+  try {
+    const r = await api('POST', '/portfolio/dividends/refresh');
+    if (r.errors && r.errors.length > 0) {
+      alert(`${r.errors.length}銘柄の取得に失敗しました:\n` + r.errors.map(e => `${e.symbol}: ${e.error}`).join('\n'));
+    }
+    await loadDividends();
+  } catch (e) {
+    alert('株価・配当の更新に失敗しました: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '株価・配当を更新';
+  }
+}
+
+async function loadDividends() {
+  const card = document.getElementById('dividendCard');
+  try {
+    const r = await api('GET', '/portfolio/dividends');
+    if (!r.has_data) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+
+    const body = document.getElementById('dividendBody');
+    const hasAnyData = r.holdings.some(h => h.latest_price !== null);
+    if (!hasAnyData) {
+      body.innerHTML = '<div style="color:var(--text2);font-size:.85rem;">まだ株価・配当データがありません。「株価・配当を更新」を押してください。</div>';
+      return;
+    }
+
+    const quantityWarning = r.missing_quantity_count > 0
+      ? `<div style="font-size:.78rem;color:var(--warn);margin-bottom:10px;">⚠ ${r.missing_quantity_count}銘柄は保有株数が未取得のため収入計算できません。保有資産ページを再貼り付けすると株数が取り込まれます。</div>`
+      : '';
+
+    const rows = r.holdings.map(h => {
+      const price = h.latest_price !== null
+        ? (h.price_currency === 'USD' ? `$${h.latest_price.toFixed(2)}` : `${h.latest_price.toLocaleString()}円`)
+        : '—';
+      const dps = h.annual_dividend_per_share
+        ? (h.price_currency === 'USD' ? `$${h.annual_dividend_per_share.toFixed(2)}` : `${h.annual_dividend_per_share.toLocaleString()}円`)
+        : '—';
+      const income = h.annual_income_yen !== null ? `${h.annual_income_yen.toLocaleString()}円` : '—';
+      const yieldStr = h.yield_pct !== null ? `${h.yield_pct}%` : '—';
+      const months = h.ex_months.length ? h.ex_months.map(m => `${m}月`).join('・') : '—';
+      return `<tr>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--border);">${h.name}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right;">${price}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right;">${dps}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right;">${yieldStr}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right;font-weight:600;">${income}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--border);font-size:.78rem;">${months}</td>
+      </tr>`;
+    }).join('');
+
+    body.innerHTML = `
+      ${quantityWarning}
+      <div style="text-align:center;margin-bottom:14px;">
+        <span style="font-size:.85rem;color:var(--text2);">年間配当収入（税引前・実績ベース）</span>
+        <div style="font-size:1.8rem;font-weight:800;color:var(--accent2);">${r.total_annual_income_yen.toLocaleString()}円</div>
+        <div style="font-size:.8rem;color:var(--text2);">月平均 ${Math.round(r.total_annual_income_yen / 12).toLocaleString()}円</div>
+      </div>
+      <div style="position:relative;height:180px;width:100%;margin-bottom:18px;">
+        <canvas id="dividendMonthlyChart"></canvas>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:.85rem;">
+          <thead><tr>
+            <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);color:var(--text2);font-size:.78rem;">銘柄</th>
+            <th style="padding:8px 10px;text-align:right;border-bottom:1px solid var(--border);color:var(--text2);font-size:.78rem;">最新株価</th>
+            <th style="padding:8px 10px;text-align:right;border-bottom:1px solid var(--border);color:var(--text2);font-size:.78rem;">年間配当/株</th>
+            <th style="padding:8px 10px;text-align:right;border-bottom:1px solid var(--border);color:var(--text2);font-size:.78rem;">利回り</th>
+            <th style="padding:8px 10px;text-align:right;border-bottom:1px solid var(--border);color:var(--text2);font-size:.78rem;">年間配当収入</th>
+            <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);color:var(--text2);font-size:.78rem;">権利落ち月</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+
+    destroyChart('dividendMonthlyChart');
+    chartInsts['dividendMonthlyChart'] = new Chart(document.getElementById('dividendMonthlyChart'), {
+      type: 'bar',
+      data: {
+        labels: r.monthly.map(m => `${m.month}月`),
+        datasets: [{
+          data: r.monthly.map(m => m.total_yen),
+          backgroundColor: 'rgba(0,212,170,.55)',
+          borderRadius: 4,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#8b90a7', font: { size: 10 } }, grid: { display: false } },
+          y: { ticks: { color: '#8b90a7', callback: v => (v / 10000).toFixed(0) + '万' }, grid: { color: '#2e3248' } },
+        },
+      },
+    });
+  } catch (e) {
+    card.style.display = 'none';
+  }
 }
 
 async function submitPortfolioPaste() {

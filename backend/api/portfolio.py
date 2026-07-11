@@ -15,6 +15,7 @@ from ..services.portfolio_analysis import (
 )
 from ..services.classification import ensure_builtin_axes, TIME_HORIZON_VALUES
 from ..services.wealth_bucket import get_bucket_summary, set_bucket_goal
+from ..services.dividend_summary import compute_dividend_summary, refresh_dividend_data
 from .auth import get_current_user
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
@@ -231,6 +232,35 @@ def put_category_exclusion(
     """指定カテゴリ（現金/株式/投資信託/年金/ポイント）に属する銘柄を一括で計算対象外にする・戻す"""
     count = set_category_excluded(db, current_user.id, category, body.excluded)
     return {"category": category, "excluded": body.excluded, "affected_count": count}
+
+
+@router.post("/dividends/refresh")
+def post_dividends_refresh(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """保有株全銘柄の株価・配当データをYahoo Financeから取得・更新する（24時間キャッシュ）"""
+    result = refresh_dividend_data(db, current_user.id)
+    return result
+
+
+@router.get("/dividends")
+def get_dividends(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    保有株の配当サマリー（銘柄別の最新株価・年間配当・利回り・権利落ち月と、
+    月別配当収入カレンダー）を返す。キャッシュ済みデータから計算するだけなので、
+    最新化したい場合は先にPOST /dividends/refreshを呼ぶこと。
+    """
+    result = compute_dividend_summary(db, current_user.id)
+    if result is None:
+        return {
+            "has_data": False,
+            "message": "株式の保有データがありません。保有資産ページを貼り付けてください。",
+        }
+    return {"has_data": True, **result}
 
 
 @router.put("/categories/{category}/tags")

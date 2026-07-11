@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, Integer, Float, Date, DateTime, ForeignKey, UniqueConstraint
 from datetime import datetime
 import uuid
 from ..core.database import Base
@@ -29,6 +29,7 @@ class Holding(Base):
     name = Column(String, nullable=False)
     institution = Column(String, nullable=True)
     market_value_yen = Column(Integer, nullable=False)
+    quantity = Column(Float, nullable=True)           # 保有株数（株式のみ。配当収入の計算に使う）
 
 
 class ClassificationAxis(Base):
@@ -93,3 +94,31 @@ class SecurityExclusion(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     security_key = Column(String, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SecurityQuote(Base):
+    """
+    銘柄の最新株価キャッシュ（Yahoo Finance chart API取得結果、全ユーザー共有）。
+    yahoo_symbolはYahoo Finance形式（日本株は"8306.T"、米国株はティッカーそのまま）。
+    """
+    __tablename__ = "security_quotes"
+
+    yahoo_symbol = Column(String, primary_key=True)
+    latest_price = Column(Float, nullable=False)
+    currency = Column(String, nullable=False)  # "JPY" | "USD" 等（Yahooのメタ情報から）
+    fetched_at = Column(DateTime, default=datetime.utcnow)
+
+
+class DividendEvent(Base):
+    """
+    銘柄の配当履歴キャッシュ（1株あたり配当、権利落ち日ベース、全ユーザー共有）。
+    金額はYahooが返すその銘柄の建値通貨（日本株=円、米国株=ドル）。
+    """
+    __tablename__ = "dividend_events"
+    __table_args__ = (UniqueConstraint("yahoo_symbol", "ex_date", name="uq_dividend_symbol_date"),)
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    yahoo_symbol = Column(String, nullable=False, index=True)
+    ex_date = Column(Date, nullable=False)
+    amount = Column(Float, nullable=False)  # 1株あたり配当（建値通貨）
+    fetched_at = Column(DateTime, default=datetime.utcnow)
